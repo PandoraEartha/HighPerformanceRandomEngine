@@ -75,19 +75,19 @@ Performance test base on 13490F WSL2 Ubuntu, built using g++ 14.02. Compare with
 
 ## Base Generator
 
-![image](https://github.com/user-attachments/assets/ba8b15be-2315-41c0-8488-e182c4113609)
+![image_2025-03-04_21-08-13](https://github.com/user-attachments/assets/66eb203c-1693-461d-9fa4-733996eb8351)
 
-`PCG32` is 1.9767 times faster than `std::uniform_int_distribution<unsigned>`
+`PCG32` is 1.9767 times faster than `std::default_random_engine`
 
-`PCG32` 比`std::uniform_int_distribution<unsigned>`快1.9767倍
+`PCG32` 比`std::default_random_engine`快1.9898倍
 
 ## Uniform Unsigned
 
 ![image](https://github.com/user-attachments/assets/b9aaf955-b1a1-4635-90ee-b9ecaf6d801f)
 
-`PCG32Uniform` is 1.9898 times faster than `std::default_random_engine`
+`PCG32Uniform` is 1.9898 times faster than `std::uniform_int_distribution<unsigned>`
 
-`PCG32Uniform` 比 `std::default_random_engine` 快1.9898倍
+`PCG32Uniform` 比 `std::uniform_int_distribution<unsigned>` 快1.9898倍
 
 # Test Demo
 
