@@ -83,11 +83,11 @@ Performance test base on 13490F WSL2 Ubuntu, built using g++ 14.02. Compare with
 
 ## Uniform Unsigned
 
-![image](https://github.com/user-attachments/assets/b9aaf955-b1a1-4635-90ee-b9ecaf6d801f)
+![image_2025-03-04_21-10-18](https://github.com/user-attachments/assets/30c4da1d-7ad5-47da-a976-3c3783f3ac56)
 
-`PCG32Uniform` is 1.9898 times faster than `std::uniform_int_distribution<unsigned>`
+`PCG32Uniform` is 1.7713 times faster than `std::uniform_int_distribution<unsigned>`
 
-`PCG32Uniform` 比 `std::uniform_int_distribution<unsigned>` 快1.9898倍
+`PCG32Uniform` 比 `std::uniform_int_distribution<unsigned>` 快1.7713倍
 
 # Test Demo
 
