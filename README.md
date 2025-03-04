@@ -3,6 +3,10 @@ Head only high performance pseudorandom engine base on PCG-XSH-RR. Multithreadin
 
 仅有头文件的随机引擎, 基于PCG-XSH-RR算法, 允许多线程, 简单易用, 随机性强. 
 
+## How to use
+
+`#include "PCG32.h"`
+
 # Functions 
 
 `void PCG32SetSeed(PCG32Struct* status,long long unsigned int seed);`
