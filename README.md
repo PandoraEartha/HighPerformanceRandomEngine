@@ -1,3 +1,5 @@
+[中文介绍]([https://markdown.com.cn](https://zhuanlan.zhihu.com/p/27708881274))
+
 # High Performance Random Engine
 Head only high performance pseudorandom engine base on PCG-XSH-RR. Multithreading allowed, easy to use, statistically good. 
 
