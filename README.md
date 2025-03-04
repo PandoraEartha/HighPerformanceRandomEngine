@@ -57,7 +57,7 @@ Performance test base on 13490F WSL2 Ubuntu, built using g++ 14.02. Compare with
 
 性能测试基于13490F WSL2 Ubuntu, 采用g++ 14.02编译. 与C++`random`库中的`std::default_random_engine`进行比较. 下面的结果显示了在特定分布上生成4074074037随机数所花费的时间. 
 
-![image](https://github.com/user-attachments/assets/7508aab5-09d6-4ff3-85b4-7b0a48343546)
+![image](https://github.com/user-attachments/assets/80df23e7-8cc0-43ed-885a-6817652c5654)
 
 ## Uniform Real Distribution 
 
