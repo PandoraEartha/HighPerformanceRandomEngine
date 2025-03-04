@@ -6,26 +6,31 @@ Head only high performance pseudorandom engine base on PCG-XSH-RR. Multithreadin
 # Functions 
 
 `void PCG32SetSeed(PCG32Struct* status,long long unsigned int seed);`
+
 Set the seed of PCG random engine and initlize 
 
 初始化随机引擎, 设置随机种子
 
 `unsigned PCG32(PCG32Struct* status);`
+
 Generate a unsigned type random number in range of [0,0xFFFFFFFF(4294967295)]
 
 产生[0,0xFFFFFFFF(4294967295)]范围的`unsigned`类型的随机整数
 
 `unsigned PCG32Uniform(PCG32Struct* status,unsigned min,unsigned max);`
+
 Generate a unsigned type random number that obey uniform distrubution in range of [min,max]
 
 产生[min,max]范围的`unsigned`类型的随机整数
 
 `double PCG32UniformReal(PCG32Struct* status,double min,double max);`
+
 Generate a double type random number that obey uniform distrubution in range of [min,max]
 
 产生[min,max]范围的`double`类型的随机整数
 
 `double PCG32StandardNormal(PCG32Struct* status);`
+
 Generate a double type random number that obey standard normal distrubution
 
 产生`double`类型的服从标准正态分布的随机数
