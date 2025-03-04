@@ -7,6 +7,18 @@ Head only high performance pseudorandom engine base on PCG-XSH-RR. Multithreadin
 
 `#include "PCG32.h"`
 
+```
+PCG32Struct PCGStatus;
+PCG32SetSeed(&PCGStatus,time(NULL));
+double random=PCG32UniformReal(&PCGStatus,-1,999);
+```
+
+note:
+
+1.Remember to set the seed. 记得设置种子. 
+
+2.Use its own `PCG32Struct` in each thread function and set different seed. 每个线程函数采用各自的`PCG32Struct`并且设置单独的种子
+
 # Functions 
 
 `void PCG32SetSeed(PCG32Struct* status,long long unsigned int seed);`
@@ -76,19 +88,6 @@ Performance test base on 13490F WSL2 Ubuntu, built using g++ 14.02. Compare with
 `PCG32Uniform` is 1.9898 times faster than `std::default_random_engine`
 
 `PCG32Uniform` 比 `std::default_random_engine` 快1.9898倍
-
-# Use Example
-```
-PCG32Struct PCGStatus;
-PCG32SetSeed(&PCGStatus,time(NULL));
-double random=PCG32UniformReal(&PCGStatus,-1,999);
-```
-
-note:
-
-1.Remember to set the seed. 记得设置种子. 
-
-2.Use its own `PCG32Struct` in each thread function and set different seed. 每个线程函数采用各自的`PCG32Struct`并且设置单独的种子
 
 # Test Demo
 
