@@ -13,7 +13,7 @@ Set the seed of PCG random engine and initlize
 `unsigned PCG32(PCG32Struct* status);`
 Generate a unsigned type random number in range of [0,0xFFFFFFFF(4294967295)]
 
-产生$[0,\texttt{0xFFFFFFFF}(4294967295)]&范围的`unsigned`类型的随机整数
+产生[0,0xFFFFFFFF(4294967295)]范围的`unsigned`类型的随机整数
 
 `unsigned PCG32Uniform(PCG32Struct* status,unsigned min,unsigned max);`
 Generate a unsigned type random number that obey uniform distrubution in range of [min,max]
