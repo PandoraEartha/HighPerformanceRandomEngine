@@ -83,6 +83,7 @@ double random=PCG32UniformReal(&PCGStatus,-1,999);
 note:
 
 1.Remember to set the seed. 记得设置种子. 
+
 2.Use its own `PCG32Struct` in each thread function and set different seed. 每个线程函数采用各自的`PCG32Struct`并且设置单独的种子
 
 # Test Demo
