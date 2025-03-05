@@ -96,3 +96,16 @@ Performance test base on 13490F WSL2 Ubuntu, built using g++ 14.02. Compare with
 # Test Demo
 
 `g++ -o test test.cpp -O2 && ./test`
+
+## `PCG32Test.h`
+
+## Functions 
+
+`double KolmogorovSmirnovTest(double* data,long long unsigned int length,double (*CDF)(double));`
+
+`double KSTest(double* data,long long unsigned int length,double (*CDF)(double))`
+
+Calculate the P-value of Kolmogorov-Smirnov Test of the random sequence and the expected distribution, `CDF` is the function pointer of Cumulative Distribution Function of the expected distribution.
+计算随机序列和期望分布的Kolmogorov-Smirnov检验的P-value, `CDF`是期望分布的分布函数的函数指针.
+
+
