@@ -87,6 +87,31 @@ static inline unsigned PCG32Uniform(PCG32Struct* status,unsigned min,unsigned ma
 	return (random%gap)+min;
 }
 
+// max can not smaller than min and gap can not be power of 2
+static inline unsigned PCG32Uniform_Strict(PCG32Struct* status,const unsigned min,const unsigned max){
+	unsigned gap=max-min+1;
+	unsigned range=(unsigned)(((PCG32Max+1)/gap)*gap);
+	unsigned random=PCG32(status);
+	while(random>range){
+		random=PCG32(status);
+	}
+	return (random%gap)+min;
+}
+
+// max can not smaller than min
+static inline unsigned PCG32Uniform_MaxBiggerThanMin(PCG32Struct* status,const unsigned min,const unsigned max){
+	long long unsigned int gap=max-min+1;
+	if((gap&(gap-1))==0){
+		return (PCG32(status)&(gap-1))+min;
+	}
+	unsigned range=(unsigned)(((PCG32Max+1)/gap)*gap);
+	unsigned random=PCG32(status);
+	while(random>range){
+		random=PCG32(status);
+	}
+	return (random%gap)+min;
+}
+
 static inline double PCG32UniformReal(PCG32Struct* status,double min,double max){
 	return min+((double)PCG32(status))*PCG32RealScale*(max-min);
 }
@@ -117,6 +142,26 @@ static inline void PCG32Init(PCG32Struct* status){
 static inline void PCG32SetSeed(PCG32Struct* status,long long unsigned int seed){
 	status->seed=seed;
 	PCG32Init(status);
+}
+
+static inline void unsignedSwap(unsigned* array,long long unsigned int index0,long long unsigned int index1){
+	const unsigned tempory=array[index0];
+	array[index0]=array[index1];
+	array[index1]=tempory;
+}
+
+// array has been fully filled
+static inline void PCG32UniformShuffle(PCG32Struct* status,unsigned* array,unsigned length){
+	if(length<2){
+		if(length==1){
+			array[0]=0;
+			return;
+		}
+		return;
+	}
+	for(long long unsigned int index=0;index<(length-1);index=index+1){
+		unsignedSwap(array,index,PCG32Uniform_MaxBiggerThanMin(status,index,length-1));
+	}
 }
 
 #ifdef __cplusplus
