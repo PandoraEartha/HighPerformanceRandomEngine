@@ -53,6 +53,19 @@ Generate a double type random number that obey standard normal distrubution
 
 产生`double`类型的服从标准正态分布的随机数
 
+`void PCG32UniformShuffle(PCG32Struct* status,unsigned* array,unsigned length);`
+
+Shuffling, swaps elements in the input sequence to ensure that every element etc. can appear anywhere in the array.
+
+洗牌, 对输入序列进行元素交换, 保证每个元素等可能的出现在数组中任意位置. 
+
+`unsigned PCG32Uniform_Strict(PCG32Struct* status,const unsigned min,const unsigned max);`
+
+Generate a unsigned type random number that obey uniform distrubution in range of [min,max], `max` can not smaller than `min` and gap(`max`-`min`) can not be power of 2
+
+产生[min,max]范围的`unsigned`类型的随机整数, `max`不能小于`min`且gap(`max`-`min`)不能是2的幂
+
+
 # Performance
 
 Performance test base on 13490F WSL2 Ubuntu, built using g++ 14.02. Compare with `std::default_random_engine` in C++ `random`. The result below shows the time consuming on generating 4074074037 random number on spicific distribution.
