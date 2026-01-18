@@ -1,38 +1,100 @@
 /**
  * Description:
+ *
+ * Lightweight, high-performance pseudorandom number generator based on PCG-XSH-RR,
+ * with excellent statistical properties. Supports both C and C++ interfaces,
+ * and is compatible with CUDA environments.
+ * Provides various distribution functions including uniform, normal, Gamma, binomial, etc.
+ *
+ * GitHub: https://github.com/PandoraEartha/HighPerformanceRandomEngine
+ *
+ * Class methods and their corresponding C functions (C++ interface / C interface):
+ *
+ * 1. Seed initialization
+ *    void SetSeed(long long unsigned int seed);
+ *    void PCG32SetSeed(PCG32Struct* status, long long unsigned int seed);
+ *
+ * 2. Generate 32-bit unsigned random number [0, 0xFFFFFFFF]
+ *    unsigned Rand();
+ *    unsigned PCG32(PCG32Struct* status);
+ *
+ * 3. Generate uniformly distributed integer in range [min, max]
+ *    unsigned Uniform(unsigned min, unsigned max);
+ *    unsigned PCG32Uniform(PCG32Struct* status, unsigned min, unsigned max);
+ *
+ * 4. Strict version uniform integer generation (min <= max, gap not power of 2)
+ *    unsigned Uniform_Strict(const unsigned min, const unsigned max);
+ *    unsigned PCG32Uniform_Strict(PCG32Struct* status, const unsigned min, const unsigned max);
+ *
+ * 5. Pre-set strict range for repeated generation of random numbers within same range
+ *    void UniformSetStrictRange(const unsigned min, const unsigned max);
+ *    void PCG32UniformSetStrictRange(PCG32Struct* status, const unsigned min, const unsigned max);
+ *
+ * 6. Generate random number using pre-set strict range (must call UniformSetStrictRange first)
+ *    unsigned Uniform_StrictRangeUnchanged();
+ *    unsigned PCG32Uniform_StrictRangeUnchanged(PCG32Struct* status);
+ *
+ * 7. Fast uniform generation assuming min <= max (no range checking)
+ *    unsigned Uniform_MaxBiggerThanMin(const unsigned min, const unsigned max);
+ *    unsigned PCG32Uniform_MaxBiggerThanMin(PCG32Struct* status, const unsigned min, const unsigned max);
+ *
+ * 8. Generate double-precision uniform real number in range [min, max)
+ *    double UniformReal(const double min, const double max);
+ *    double PCG32UniformReal(PCG32Struct* status, const double min, const double max);
+ *
+ * 9. Generate standard normal distribution random number (mean = 0, standard deviation = 1)
+ *    double StandardNormal();
+ *    double PCG32StandardNormal(PCG32Struct* status);
+ *
+ * 10. Initialize Gamma distribution parameters (alpha >= 1)
+ *     bool GammaInit(const double alpha, const double beta);
+ *     bool PCG32GammaInit(PCG32Struct* status, const double alpha, const double beta);
+ *
+ * 11. Generate Gamma distribution random number (must call GammaInit first)
+ *     double Gamma();
+ *     double PCG32Gamma(PCG32Struct* status);
+ *
+ * 12. Generate binomial distribution random number
+ *     unsigned Binomial(double probability, const unsigned repeatUnsigned);
+ *     unsigned PCG32Binomial(PCG32Struct* status, double probability, const unsigned repeatUnsigned);
+ *
+ * 13. Uniformly shuffle an array
+ *     template<typename Type>
+ *     void UniformShuffle(Type* array, long long unsigned int length);
+ *     void PCG32UniformShuffle(PCG32Struct* status, Type* array, long long unsigned int length);
+ *
+ * Example (C++):
+ *
+ * PCG32PRNG PCG32(time(NULL));
+ * double val = PCG32.UniformReal(-1.0, 999.0);
  * 
- * Head only pseudorandom engine base on PCG-XSH-RR, 
- * high performance, statistically good and easy to use.
+ * const unsigned repeat=1000;
+ * const double probability=0.9;
+ * std::binomial_distribution<> Binomial(repeat,probability);
+ * unsigned successes=Binomial(PCG32); // use PCG32.Binomial(probability,repeat) is much better
  * 
- * Functions:
- * 
- * Set the seed of PCG random engine and initlize 
- * void PCG32SetSeed(PCG32Struct* status,long long unsigned int seed);
- * 
- * Generate a unsigned type random number in range of [0,0xFFFFFFFF(4294967295)]
- * unsigned PCG32(PCG32Struct* status);
- * 
- * Generate a unsigned type random number that obey uniform distrubution in range of [min,max]
- * unsigned PCG32Uniform(PCG32Struct* status,unsigned min,unsigned max);
- * 
- * Generate a double type random number that obey uniform distrubution in range of [min,max)
- * double PCG32UniformReal(PCG32Struct* status,double min,double max);
- * 
- * Generate a double type random number that obey standard normal distrubution
- * double PCG32StandardNormal(PCG32Struct* status);
- * 
- * Example:
+ * Example (C):
  * 
  * PCG32Struct PCGStatus;
  * PCG32SetSeed(&PCGStatus,time(NULL));
  * double random=PCG32UniformReal(&PCGStatus,-1,999);
+ *
+ * const unsigned repeat=1000;
+ * const double probability=0.9;
+ * unsigned successes=PCG32Binomial(&PCGStatus,probability,repeat);
  * 
- * Note:
- * 
- * Remember to set the seed.
- * Use its own PCG32Struct in each thread function and set different seed. 
- * 
-*/
+ * Notes:
+ *
+ * 1. Always set the seed before use.
+ * 2. In multithreaded environments, it is recommended to use separate PCG32Struct
+ *    or PCG32PRNG objects for each thread with different seeds.
+ * 3. Gamma distribution currently only supports alpha >= 1.
+ * 4. Strict range functions are useful when repeatedly generating random numbers
+ *    within the same range for better performance.
+ * 5. C interface functions are prefixed with "PCG32", while C++ interface is
+ *    encapsulated in the PCG32PRNG class.
+ *
+ */
 
 #ifndef __PCG32_H__
 #define __PCG32_H__
@@ -79,10 +141,6 @@
 #define PCG32BINOMIAL_MAXITERATION 110
 #define PCG32BINOMIAL_FARFROMMENA  20
 
-#ifdef __cplusplus
-extern "C"{
-#endif
-
 typedef struct _PCG32Struct{
 	long long unsigned int state;
 	long long unsigned int seed;
@@ -96,6 +154,47 @@ typedef struct _PCG32Struct{
 	unsigned uniformStrictRange;
 	unsigned uniformStrictMin;
 }PCG32Struct;
+
+#if defined(__cplusplus)||PCG32_CUDA
+
+#include <cstdint>
+
+class PCG32PRNG{
+public:
+	PCG32PRNG();
+	PCG32PRNG(long long unsigned int seed);
+	~PCG32PRNG(){}
+	void SetSeed(long long unsigned int seed);
+
+	unsigned Rand();
+	unsigned Uniform(unsigned min,unsigned max);
+	unsigned Uniform_Strict(const unsigned min,const unsigned max);
+	void UniformSetStrictRange(const unsigned min,const unsigned max);
+	unsigned Uniform_StrictRangeUnchanged();
+	unsigned Uniform_MaxBiggerThanMin(const unsigned min,const unsigned max);
+	double UniformReal(const double min,const double max);
+	double StandardNormal();
+	bool GammaInit(const double alpha,const double beta);
+	double Gamma();
+	unsigned Binomial(double probability,const unsigned repeatUnsigned);
+	template<typename Type>
+	void UniformShuffle(Type* array,long long unsigned int length);
+	double Exponential(const double lambda);
+
+	using result_type=uint32_t;
+	static constexpr result_type min(){return 0;}
+	static constexpr result_type max(){return PCG32MAX;}
+
+	result_type operator()();
+private:
+	PCG32Struct status;
+};
+
+#endif
+
+#ifdef __cplusplus
+extern "C"{
+#endif
 
 PCG32_HOST_DEVICE static inline unsigned rotr32(unsigned x,unsigned r){
 	return x>>r|x<<(-r&31);
@@ -138,7 +237,7 @@ PCG32_HOST_DEVICE static inline unsigned PCG32Uniform_Strict(PCG32Struct* status
 	return (random%gap)+min;
 }
 
-PCG32_HOST_DEVICE static inline unsigned PCG32Uniform_StrictRangeUnchanged(PCG32Struct* status,const unsigned min,const unsigned max){
+PCG32_HOST_DEVICE static inline unsigned PCG32Uniform_StrictRangeUnchanged(PCG32Struct* status){
 	unsigned random=PCG32(status);
 	while(random>status->uniformStrictRange){
 		random=PCG32(status);
@@ -168,7 +267,7 @@ PCG32_HOST_DEVICE static inline unsigned PCG32Uniform_MaxBiggerThanMin(PCG32Stru
 	return (random%gap)+min;
 }
 
-PCG32_HOST_DEVICE static inline double PCG32UniformReal(PCG32Struct* status,double min,double max){
+PCG32_HOST_DEVICE static inline double PCG32UniformReal(PCG32Struct* status,const double min,const double max){
 	return min+((double)PCG32(status))*PCG32REAL_SCALE*(max-min);
 }
 
@@ -190,7 +289,7 @@ PCG32_HOST_DEVICE static inline double PCG32StandardNormal(PCG32Struct* status){
 }
 
 // Currently, only the algorithm for a >= 1 has been implemented
-PCG32_HOST_DEVICE static inline bool PCG32GammaInit(PCG32Struct* status,double alpha,double beta){
+PCG32_HOST_DEVICE static inline bool PCG32GammaInit(PCG32Struct* status,const double alpha,const double beta){
 	if(alpha<1.0){
 		return false;
 	}
@@ -407,6 +506,10 @@ PCG32_HOST_DEVICE static inline unsigned PCG32Binomial(PCG32Struct* status,doubl
 	return result;
 }
 
+PCG32_HOST_DEVICE static inline double PCG32Exponential(PCG32Struct* status,const double lambda){
+	return -log(1-PCG32UniformReal(status,0,1))/lambda;
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -414,19 +517,99 @@ PCG32_HOST_DEVICE static inline unsigned PCG32Binomial(PCG32Struct* status,doubl
 #if defined(__cplusplus)||PCG32_CUDA
 
 template<typename Type>
-PCG32_HOST_DEVICE static inline void PCG32SWAP(Type* array,long long unsigned int index0,long long unsigned int index1){
+PCG32_HOST_DEVICE static inline void PCG32SWAP(Type* array,const long long unsigned int index0,const long long unsigned int index1){
 	const Type tempory=array[index0];                                                                            
     array[index0]=array[index1];                                                                                 
     array[index1]=tempory;  
 }
 
 template<typename Type>
-PCG32_HOST_DEVICE static inline void PCG32UniformShuffle(PCG32Struct* status,Type* array,long long unsigned int length){
+PCG32_HOST_DEVICE static inline void PCG32UniformShuffle(PCG32Struct* status,Type* array,const long long unsigned int length){
 	if(length>1){                                                                                
     	for(long long unsigned int index=0;index<length-1;index=index+1){                        
             PCG32SWAP(array,index,PCG32Uniform_MaxBiggerThanMin(status,index,length-1));
         }                                                                                        
     }   
+}
+
+template<typename Type>
+PCG32_HOST_DEVICE static inline void PCG32UniformShuffle_FirstK(PCG32Struct* status,Type* array,const long long unsigned int length,long long unsigned int k){
+	if(length>1){                                                                                
+		if(k>length){
+			k=length;
+		}
+    	for(long long unsigned int index=0;index<k;index=index+1){                        
+            PCG32SWAP(array,index,PCG32Uniform_MaxBiggerThanMin(status,index,length-1));
+        }                                                                                        
+    }   
+}
+
+PCG32_HOST_DEVICE inline PCG32PRNG::PCG32PRNG():PCG32PRNG(0xADABF3924A46334BLLU){
+}
+
+PCG32_HOST_DEVICE inline PCG32PRNG::PCG32PRNG(long long unsigned int seed){
+	SetSeed(seed);
+}
+
+PCG32_HOST_DEVICE inline void PCG32PRNG::SetSeed(long long unsigned int seed){
+	PCG32SetSeed(&status,seed);
+}
+
+PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Rand(){
+	return PCG32(&status);
+}
+
+PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Uniform(unsigned min,unsigned max){
+	return PCG32Uniform(&status,min,max);
+}
+
+PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Uniform_Strict(unsigned min,unsigned max){
+	return PCG32Uniform_Strict(&status,min,max);
+}
+
+PCG32_HOST_DEVICE inline void PCG32PRNG::UniformSetStrictRange(const unsigned min,const unsigned max){
+	PCG32UniformSetStrictRange(&status,min,max);
+}
+
+PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Uniform_StrictRangeUnchanged(){
+	return PCG32Uniform_StrictRangeUnchanged(&status);
+}
+
+PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Uniform_MaxBiggerThanMin(const unsigned min,const unsigned max){
+	return PCG32Uniform_MaxBiggerThanMin(&status,min,max);
+}
+
+PCG32_HOST_DEVICE inline double PCG32PRNG::UniformReal(const double min,const double max){
+	return PCG32UniformReal(&status,min,max);
+}
+
+PCG32_HOST_DEVICE inline double PCG32PRNG::StandardNormal(){
+	return PCG32StandardNormal(&status);
+}
+
+PCG32_HOST_DEVICE inline bool PCG32PRNG::GammaInit(const double alpha,const double beta){
+	return PCG32GammaInit(&status,alpha,beta);
+}
+
+PCG32_HOST_DEVICE inline double PCG32PRNG::Gamma(){
+	return PCG32Gamma(&status);
+}
+
+PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Binomial(double probability,const unsigned repeatUnsigned){
+	return PCG32Binomial(&status,probability,repeatUnsigned);
+}
+
+template<typename Type>
+PCG32_HOST_DEVICE inline void PCG32PRNG::UniformShuffle(Type* array,long long unsigned int length){
+	PCG32UniformShuffle(&status,array,length);
+}
+
+PCG32_HOST_DEVICE inline double PCG32PRNG::Exponential(const double lambda){
+	return PCG32Exponential(&status,lambda);
+}
+
+PCG32_HOST_DEVICE inline PCG32PRNG::result_type PCG32PRNG::operator()(){
+	return Rand();
 }
 
 #else
@@ -474,6 +657,18 @@ GENERATE_FOR_TYPE(unsigned,unsigned)
 	            PCG32_GENERIC_SWAP(array,index,PCG32Uniform_MaxBiggerThanMin(status,index,length-1));\
 	        }                                                                                        \
         }                                                                                            \
+    }while(0)
+
+#define PCG32UniformShuffle_FirstK(status,array,length,k)                                            \
+    do{                                                                                              \
+        if(length>1){                                                                                \
+			if(k>length){                                                                            \
+				k=length;                                                                            \
+			}                                                                                        \
+	    	for(long long unsigned int index=0;index<k;index=index+1){                               \
+	            PCG32_GENERIC_SWAP(array,index,PCG32Uniform_MaxBiggerThanMin(status,index,length-1));\
+	        }                                                                                        \
+	    }                                                                                            \
     }while(0)
 
 #endif
