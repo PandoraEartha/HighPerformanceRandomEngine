@@ -178,8 +178,9 @@ public:
 	double Gamma();
 	unsigned Binomial(double probability,const unsigned repeatUnsigned);
 	template<typename Type>
-	void UniformShuffle(Type* array,long long unsigned int length);
+	void UniformShuffle(Type* array,const long long unsigned int length);
 	double Exponential(const double lambda);
+	double PowerLaw(const double min,const double alpha);
 
 	using result_type=uint32_t;
 	static constexpr result_type min(){return 0;}
@@ -189,6 +190,8 @@ public:
 private:
 	PCG32Struct status;
 };
+
+using PCG32PseudoRandomNumberGenerator=PCG32PRNG;
 
 #endif
 
@@ -510,6 +513,10 @@ PCG32_HOST_DEVICE static inline double PCG32Exponential(PCG32Struct* status,cons
 	return -log(1-PCG32UniformReal(status,0,1))/lambda;
 }
 
+PCG32_HOST_DEVICE static inline double PCG32PowerLaw(PCG32Struct* status,const double min,const double alpha){
+	return min*pow(1-PCG32UniformReal(status,0,1),1.0/(1.0-alpha));
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -600,12 +607,16 @@ PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Binomial(double probability,const u
 }
 
 template<typename Type>
-PCG32_HOST_DEVICE inline void PCG32PRNG::UniformShuffle(Type* array,long long unsigned int length){
+PCG32_HOST_DEVICE inline void PCG32PRNG::UniformShuffle(Type* array,const long long unsigned int length){
 	PCG32UniformShuffle(&status,array,length);
 }
 
 PCG32_HOST_DEVICE inline double PCG32PRNG::Exponential(const double lambda){
 	return PCG32Exponential(&status,lambda);
+}
+
+PCG32_HOST_DEVICE inline double PCG32PRNG::PowerLaw(const double min,const double alpha){
+	return PCG32PowerLaw(&status,min,alpha);
 }
 
 PCG32_HOST_DEVICE inline PCG32PRNG::result_type PCG32PRNG::operator()(){
