@@ -179,6 +179,9 @@ typedef struct PCG32Struct{
 #if defined(__cplusplus)||PCG32_CUDA
 
 #include <cstdint>
+#include <cmath>
+#include <limits>
+#include <algorithm>
 
 class PCG32PRNG{
 public:
@@ -206,6 +209,9 @@ public:
     PCG32_HOST_DEVICE void RandomPointInCycle(const double radius,double* xy);
     PCG32_HOST_DEVICE double LogNormal();
     PCG32_HOST_DEVICE double LogNormal(const double mu,const double sigma);
+    PCG32_HOST_DEVICE unsigned Geometric(const double probability);
+    PCG32_HOST_DEVICE bool PoissonInitialize(const double mu);
+    PCG32_HOST_DEVICE double Poisson();
 
     using result_type=uint32_t;
     PCG32_HOST_DEVICE static constexpr result_type min(){return 0;}
@@ -446,7 +452,6 @@ PCG32_HOST_DEVICE static inline double PCG32LnStirling(double x){
         sub=sub+log(x);
         x=x+1;
     }
-    x=x-1;
     const double ln2Pidive2=0.91893853320467274178032973640561763986139747363778341L;
     const double lnx=log(x);
     return ln2Pidive2+lnx*0.5+x*(lnx-1.0)+PCG32LnStirlingLeft(x)-sub;
@@ -618,10 +623,8 @@ PCG32_HOST_DEVICE static inline bool PCG32PoissonInitialize(PCG32Struct* status,
         const double dx=sqrt(2*floorMu*log(32*floorMu*PiDiveBy4));
         #if defined(__cplusplus)&&(!PCG32_CUDA)
         constexpr double epsilon=(1.0-std::numeric_limits<double>::epsilon())/2;
-        constexpr double threshod=(double)PCG32MAX+epsilon;
         const double roundMu=std::round(std::max(6.0,std::min(floorMu,dx)));
         #else
-        const double epsilon=(1.0-DBL_EPSILON)/2;
         double roundMuTemporary;
         double min;
         if(floorMu<dx){
@@ -635,11 +638,10 @@ PCG32_HOST_DEVICE static inline bool PCG32PoissonInitialize(PCG32Struct* status,
             roundMuTemporary=6.0;
         }
         const double roundMu=roundMuTemporary;
-        const double threshod=(double)PCG32MAX+epsilon;
         #endif
         const double sqrtPi2 =1.2533141373155002512078826424055226265034933703049692L;
         const double logMu=log(mu);
-        const double lgmma=PCG32LnStirling(floorMu+1);
+        const double lgmma=PCG32LnStirling(floorMu);
         const double sqrtMu=sqrt(floorMu);
         double c[6];
         c[1]=sqrtMu*sqrtPi2;
@@ -745,7 +747,7 @@ PCG32_HOST_DEVICE static inline unsigned PCG32Poisson(PCG32Struct* status){
                 k=ceil(unceil);
                 w=-roundMu*cxDiviedBy1*(1+unceil/2);
             }
-            if(w-ln-k*logMu<=lgmma-PCG32LnStirling(k+floorMu+1)){
+            if(w-ln-k*logMu<=lgmma-PCG32LnStirling(k+floorMu)){
                 if(k+floorMu<threshod){
                     break;
                 }
@@ -783,9 +785,9 @@ PCG32_HOST_DEVICE static inline double PCG32Benford(PCG32Struct* status){
 }
 
 // n >= 1
-// n uniform variables that with sum to sum
+// n uniform real variables that with sum to sum
 // undefined behivor if length of variables < n
-PCG32_HOST_DEVICE static inline void PCG32UniformRealSum(PCG32Struct* status,const unsigned n,const double sum,double* variables){
+PCG32_HOST_DEVICE static inline void PCG32UniformSumReal(PCG32Struct* status,const unsigned n,const double sum,double* variables){
     #if 0
     double R=sum;
     for(unsigned index=0;index<n-1;index=index+1){
@@ -797,7 +799,7 @@ PCG32_HOST_DEVICE static inline void PCG32UniformRealSum(PCG32Struct* status,con
     #else
     double S=0;
     for(unsigned index=0;index<n;index=index+1){
-        variables[index]=-log(1-PCG32UniformReal(status,0,1));
+        variables[index]=PCG32Exponential(status,1);
         S=S+variables[index];
     }
     const double scale=sum/S;
@@ -805,6 +807,43 @@ PCG32_HOST_DEVICE static inline void PCG32UniformRealSum(PCG32Struct* status,con
         variables[index]=variables[index]*scale;
     }
     #endif
+}
+
+PCG32_HOST_DEVICE static inline unsigned PCG32Geometric(PCG32Struct* status,const double probability){
+    const double uniform=PCG32UniformReal(status,0,1);
+    return (unsigned)(log(uniform)/log(1.0-probability))+1;
+}
+
+PCG32_HOST_DEVICE static inline unsigned PCG32Geometric_SmallProbability(PCG32Struct* status,const double probability){
+    const double uniform=PCG32UniformReal(status,0,1);
+    return (unsigned)(log(uniform)/log1p(-probability))+1;
+}
+
+// sum of probabilities must be 1
+PCG32_HOST_DEVICE static inline unsigned PCG32MultinomialSampling(PCG32Struct* status,const double* probabilities,const unsigned length){
+    const double uniform=PCG32UniformReal(status,0,1);
+    if(probabilities[0]>=uniform){
+        return 0;
+    }
+    double sum=probabilities[0];
+    for(unsigned index=1;index<length;index=index+1){
+        sum=sum+probabilities[index];
+        if(sum>=uniform){
+            return index;
+        }
+    }
+}
+
+// sum of probabilities must be 1
+PCG32_HOST_DEVICE static inline void PCG32MultinomialSamplingCount(PCG32Struct* status,const double* probabilities,const unsigned length,const unsigned count,unsigned* result){
+    double probabilityLeft=1;
+    unsigned sumCount=0;
+    for(unsigned index=0;index<length-1;index=index+1){
+        result[index]=PCG32Binomial(status,probabilities[index]/probabilityLeft,count-sumCount);
+        sumCount=sumCount+result[index];
+        probabilityLeft=probabilityLeft-probabilities[index];
+    }
+    result[length-1]=count-sumCount;
 }
 
 #ifdef __cplusplus
@@ -928,6 +967,32 @@ PCG32_HOST_DEVICE inline double PCG32PRNG::LogNormal(){
 PCG32_HOST_DEVICE inline double PCG32PRNG::LogNormal(const double mu,const double sigma){
     return exp(Normal(mu,sigma));
 }
+
+PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Geometric(const double probability){
+    return PCG32Geometric(&status,probability);
+}
+
+PCG32_HOST_DEVICE inline bool PCG32PRNG::PoissonInitialize(const double mu){
+    return PCG32PoissonInitialize(&status,mu);
+}
+
+PCG32_HOST_DEVICE inline double PCG32PRNG::Poisson(){
+    return PCG32Poisson(&status);
+}
+
+// #include <algorithm>
+
+// PCG32_HOST_DEVICE static inline void PCG32UniformSum(PCG32Struct* status,const unsigned n,const unsigned sum,unsigned* variables){
+//     for(unsigned index=1;index<n;index=index+1){
+//         variables[index]=PCG32Uniform_MaxBiggerThanMin(status,0,sum);
+//     }
+//     std::sort(variables+1,variables+n);
+//     variables[0]=variables[1];
+//     for(unsigned index=1;index<n-1;index=index+1){
+//         variables[index]=variables[index+1]-variables[index];
+//     }
+//     variables[n-1]=sum-variables[n-1];
+// }
 
 #else
 
