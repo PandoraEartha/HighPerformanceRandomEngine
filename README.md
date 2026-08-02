@@ -2,6 +2,10 @@
 
 A lightweight, high-performance pseudorandom number generator based on the PCG-XSH-RR algorithm, offering excellent statistical quality and computational efficiency. Provides both C and C++ interfaces with full CUDA compatibility for GPU acceleration, with optional AVX512 vectorization support.
 
+# Performance
+
+<img width="2144" height="2954" alt="pcg32_vs_std_speed_comparison_log" src="https://github.com/user-attachments/assets/18286bda-0793-419a-91b1-b8a16ce5465c" />
+
 ---
 
 ## 📊 Quick Reference
