@@ -476,6 +476,7 @@ g++ -O3 -mavx512f -mavx512dq -std=c++11 -o myapp main.cpp
 | `__x16__PCG32SetSeed` | Initialize 16 generators |
 | `__x16__PCG32` | Generate 16 random 32-bit integers |
 | `__x16__PCG32UniformReal` | Generate 16 uniform reals in `[0,1)` |
+| `__x16__PCG32UniformReal_MinMax` | Generate 16 uniform reals in `[min, max)` |
 | `__x16__PCG32UniformSetStrictRange` | Preset a strict range for all 16 lanes |
 | `__x16__PCG32Uniform_StrictRangeUnchanged` | Generate 16 integers from preset range |
 
@@ -485,17 +486,12 @@ g++ -O3 -mavx512f -mavx512dq -std=c++11 -o myapp main.cpp
 #include "PCG32.h"
 
 // 1. Initialize 16 generators with seeds
+// Set different seeds in different thread!
 __x16__PCG32Struct avxState;
-__x16__SeedArray seeds = {
-    0x123456789ABCDEF0ULL, 0x23456789ABCDEF01ULL,
-    0x3456789ABCDEF012ULL, 0x456789ABCDEF0123ULL,
-    0x56789ABCDEF01234ULL, 0x6789ABCDEF012345ULL,
-    0x789ABCDEF0123456ULL, 0x89ABCDEF01234567ULL,
-    0x9ABCDEF012345678ULL, 0xABCDEF0123456789ULL,
-    0xBCDEF0123456789AULL, 0xCDEF0123456789ABULL,
-    0xDEF0123456789ABCULL, 0xEF0123456789ABCDULL,
-    0xF0123456789ABCDEULL, 0x0123456789ABCDEFULL
-};
+__x16__SeedArray seeds;
+for (int i = 0; i < 16; i++) {
+    seeds[i] = 0xADABF3924A46334BLLU + i * 0x9E3779B97F4A7C15LLU;
+}
 __x16__PCG32SetSeed(&avxState, seeds);
 
 // 2. Generate 16 random integers
@@ -516,6 +512,11 @@ for (int batch = 0; batch < 10; ++batch) {
     __x16__PCG32Uniform_StrictRangeUnchanged(&avxState, strictRandoms);
     // strictRandoms[0..15] are all in [0, 999]
 }
+
+// 6. Generate 16 uniform reals in custom range [min, max)
+__x16__DoubleArray customUniforms;
+__x16__PCG32UniformReal_MinMax(&avxState, -5.0, 5.0, customUniforms);
+// customUniforms[0..15] are all in [-5.0, 5.0)
 ```
 
 > ⚠️ **Note:** AVX512 functions are not available in CUDA mode.
