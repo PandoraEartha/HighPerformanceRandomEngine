@@ -77,11 +77,12 @@
  *   __x16__DoubleArray   : 16 x double   (random reals)
  *
  * AVX512 functions:
- *   __x16__PCG32SetSeed                    : Initialize 16 generators
- *   __x16__PCG32                           : Generate 16 random 32-bit integers
- *   __x16__PCG32UniformReal                : Generate 16 uniform reals in [0,1)
- *   __x16__PCG32UniformSetStrictRange      : Preset a strict range for all 16 lanes
- *   __x16__PCG32Uniform_StrictRangeUnchanged: Generate 16 integers from preset range
+ *   __x16__PCG32SetSeed                      : Initialize 16 generators
+ *   __x16__PCG32                             : Generate 16 random 32-bit integers
+ *   __x16__PCG32UniformReal                  : Generate 16 uniform reals in [0,1)
+ *   __x16__PCG32UniformReal_MinMax           : Generate 16 uniform reals in [min, max)
+ *   __x16__PCG32UniformSetStrictRange        : Preset a strict range for all 16 lanes
+ *   __x16__PCG32Uniform_StrictRangeUnchanged : Generate 16 integers from preset range
  *
  *
  * C++ Class API (PCG32PRNG)
@@ -201,6 +202,11 @@
  *   // Note: For optimal performance with AVX512 strict range, the range should be
  *   // preset once with __x16__PCG32UniformSetStrictRange, then reuse it with
  *   // __x16__PCG32Uniform_StrictRangeUnchanged for many batches.
+ * 
+ *   // 6. Generate 16 uniform reals in custom range [min, max)
+ *   __x16__DoubleArray customUniforms;
+ *   __x16__PCG32UniformReal_MinMax(&avxState, -5.0, 5.0, customUniforms);
+ *   // customUniforms[0..15] are all in [-5.0, 5.0)
  *
  * Complete AVX512 compilation example:
  *   g++ -O3 -mavx512f -mavx512dq -std=c++11 -o myapp main.cpp
@@ -1131,6 +1137,26 @@ static inline void __x16__PCG32SetSeed(__x16__PCG32Struct* status,const __x16__S
 static inline void __x16__PCG32UniformReal(__x16__PCG32Struct* status,__x16__DoubleArray random){
     PCG32_AVX512_PCG32_INTRINSIC
     PCG32_AVX512_UNIFORM_REAL_INTRINSIC
+    _mm512_store_pd(random+0,random0);
+    _mm512_store_pd(random+8,random1);
+}
+
+static inline void __x16__PCG32UniformReal_MinMax(__x16__PCG32Struct* status,const double min,const double max,__x16__DoubleArray random){
+    PCG32_AVX512_PCG32_INTRINSIC
+    PCG32_AVX512_UNIFORM_REAL_INTRINSIC
+    union DouleLLU{
+        double d;
+        long long unsigned int u;
+    }MinUnion,MaxUnion;
+    MinUnion.d=min;
+    MaxUnion.d=max;
+    const __m512d minv=_mm512_castsi512_pd(_mm512_set1_epi64(MinUnion.u));
+    const __m512d maxv=_mm512_castsi512_pd(_mm512_set1_epi64(MaxUnion.u));
+    const __m512d gapv=_mm512_sub_pd(maxv,minv);
+    random0=_mm512_mul_pd(random0,gapv);
+    random1=_mm512_mul_pd(random1,gapv);
+    random0=_mm512_add_pd(random0,minv);
+    random1=_mm512_add_pd(random1,minv);
     _mm512_store_pd(random+0,random0);
     _mm512_store_pd(random+8,random1);
 }
