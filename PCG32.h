@@ -1,220 +1,370 @@
 /**
+// 
+// PCG32.h
+// High-performance PCG-XSH-RR pseudorandom number generator with comprehensive distributions
 //
- * PCG32.h
- * High-performance PCG-XSH-RR pseudorandom number generator with comprehensive distributions
- *
- * Lightweight, high-performance pseudorandom number generator based on the PCG-XSH-RR algorithm,
- * offering excellent statistical quality and computational efficiency. Provides both C and C++
- * interfaces with full CUDA compatibility for GPU acceleration. Some function provides AVX512 
- * version. 
- * 
- * @author PandoraEartha
- * @see https://github.com/PandoraEartha/HighPerformanceRandomEngine
- *
- * 
- * C API (prefix: PCG32)
- *
- * | Function                                    | Description                                   |
- * |---------------------------------------------|-----------------------------------------------|
- * | PCG32SetSeed                                | Initialize generator with seed                |
- * | PCG32                                       | Generate 32-bit uniform integer               |
- * | PCG32Uniform                                | Uniform integer [min, max] (auto-order)       |
- * | PCG32Uniform_Strict                         | Uniform integer (min <= max, gap not power-2) |
- * | PCG32UniformSetStrictRange                  | Preset strict range for repeated use          |
- * | PCG32Uniform_StrictRangeUnchanged           | Generate using preset strict range            |
- * | PCG32Uniform_MaxBiggerThanMin               | Fast uniform (assumes min <= max)             |
- * | PCG32UniformReal                            | Uniform real in [min, max)                    |
- * | PCG32StandardNormal                         | Standard normal N(0,1)                        |
- * | PCG32GammaInitialize                        | Initialize Gamma distribution (alpha >= 1)    |
- * | PCG32Gamma                                  | Generate Gamma(alpha, beta)                   |
- * | PCG32Binomial                               | Binomial(n, p)                                |
- * | PCG32PoissonInitialize                      | Initialize Poisson distribution               |
- * | PCG32Poisson                                | Generate Poisson(mu)                          |
- * | PCG32Exponential                            | Exponential(lambda)                           |
- * | PCG32PowerLaw                               | Power-law (min, alpha)                        |
- * | PCG32Geometric                              | Geometric(p)                                  |
- * | PCG32Geometric_SmallProbability             | Geometric(p) optimized for small p            |
- * | PCG32LogNormal                              | Log-normal(mu, sigma)                         |
- * | PCG32StandardLogNormal                      | Standard log-normal (mu=0, sigma=1)           |
- * | PCG32Benford                                | Benford's law (digits 1-12)                   |
- * | PCG32Benford_SpecificLength                 | Benford with specified digit length range     |
- * | PCG32RandomPointInSphere3D                  | Uniform point in 3D sphere                    |
- * | PCG32RandomPointInSphereNDimension          | Uniform point in N-dimensional sphere         |
- * | PCG32RandomPointInCycle                     | Uniform point in 2D circle                    |
- * | PCG32UniformSumReal                         | N uniform reals summing to a fixed value      |
- * | PCG32UniformShuffle                         | Fisher-Yates shuffle (macro, type-generic)    |
- * | PCG32UniformShuffle_FirstK                  | Fisher-Yates shuffle first K element          |
- * 
- * Features:
- * - 32-bit uniform random integers [0, 0xFFFFFFFF]
- * - Uniform real numbers [min, max)
- * - Multiple integer uniform variants (general, strict, fast, preset-range)
- * - Standard normal distribution (Box-Muller transform)
- * - Gamma distribution (alpha >= 1, Marsaglia & Tsang method)
- * - Binomial distribution (efficient BTPE algorithm)
- * - Poisson distribution (saddlepoint approximation for large mu)
- * - Exponential distribution
- * - Power-law (Pareto) distribution
- * - Geometric distribution (standard + small-probability optimized)
- * - Log-normal distribution (standard + general)
- * - Benford's law distributed numbers
- * - N-dimensional uniform points in spheres
- * - Uniform points on/inside 2D circles
- * - Uniform simplex sampling (fixed-sum real variables)
- * - Fisher-Yates array shuffling (template for arbitrary types)
- *
- * AVX512 Vectorization Support
- *
- * When compiled with GCC or G++ on x86_64 platforms with AVX512F and AVX512DQ instruction sets,
- * the library provides SIMD functions that generate 16 random numbers simultaneously.
- *
- * Build flags: -mavx512f -mavx512dq
- *
- * AVX512 data types (64-byte aligned):
- *   __x16__StateArray    : 16 x uint64_t (generator states)
- *   __x16__SeedArray     : 16 x uint64_t (seeds)
- *   __x16__UnsignedArray : 16 x uint32_t (random integers)
- *   __x16__DoubleArray   : 16 x double   (random reals)
- *
- * AVX512 functions:
- *   __x16__PCG32SetSeed                      : Initialize 16 generators
- *   __x16__PCG32                             : Generate 16 random 32-bit integers
- *   __x16__PCG32UniformReal                  : Generate 16 uniform reals in [0,1)
- *   __x16__PCG32UniformReal_MinMax           : Generate 16 uniform reals in [min, max)
- *   __x16__PCG32UniformSetStrictRange        : Preset a strict range for all 16 lanes
- *   __x16__PCG32Uniform_StrictRangeUnchanged : Generate 16 integers from preset range
- *
- *
- * C++ Class API (PCG32PRNG)
- *
- * All C functions are wrapped as methods of the PCG32PRNG class. Template support
- * is provided for UniformShuffle and UniformShuffle_FirstK.
- *
- * CUDA Support
- *
- * All functions are decorated with PCG32_HOST_DEVICE, enabling direct usage within
- * CUDA kernel code. Simply include this header in your .cu files.
- *
- * Important Notes
- *
- * 1. Seed required: Always call SetSeed/PCG32SetSeed before generating numbers.
- * 2. Multi-threading: Use separate generator instances per thread with distinct seeds.
- * 3. Gamma restriction: Currently only supports shape parameter alpha >= 1.
- * 4. Performance tip: For repeated generation within the same integer range,
- *    use UniformSetStrictRange + Uniform_StrictRangeUnchanged for optimal speed.
- * 5. AVX512 restriction: AVX512 functions are only available with GCC/G++ on x86_64
- *    and require -mavx512f -mavx512dq flags. They are not available in CUDA mode.
- *
- * Usage Examples
- *
- * C++ Interface:
- *
- *   #include "PCG32.h"
- *   
- *   // Basic initialization and uniform real
- *   PCG32PRNG rng(time(nullptr));
- *   double u = rng.UniformReal(-1.0, 1.0);  // uniform in [-1.0, 1.0)
- *   
- *   // Binomial distribution: 1000 trials with p=0.9
- *   unsigned binom = rng.Binomial(0.9, 1000);
- *   
- *   // Gamma distribution: must initialize first (alpha >= 1)
- *   rng.GammaInitialize(2.0, 1.0))           // alpha=2.0, beta=1.0
- *   double gamma = rng.Gamma();              // Gamma(2.0, 1.0) sample
- *   
- *   // Fast strict-range integer generation: preset range once, generate many times
- *   rng.UniformSetStrictRange(0, 999);       // preset range [0, 999]
- *   for (int i = 0; i < 100; ++i) {
- *       unsigned x = rng.Uniform_StrictRangeUnchanged();  // fast, no range checks
- *   }
- *   
- *   // Random integer with auto-range (min/max auto-sorted)
- *   unsigned x = rng.Uniform(10, 20);
- *   
- *   // Shuffle an array
- *   int myArray[100];
- *   rng.UniformShuffle(myArray, 100);
- *
- * C Interface:
- *
- *   #include "PCG32.h"
- *   
- *   PCG32Struct state;
- *   PCG32SetSeed(&state, time(NULL));
- *   
- *   // Uniform real in [-1.0, 1.0)
- *   double u = PCG32UniformReal(&state, -1.0, 1.0);
- *   
- *   // Binomial: 1000 trials with p=0.9
- *   unsigned binom = PCG32Binomial(&state, 0.9, 1000);
- *   
- *   // Gamma: must initialize first
- *   if (PCG32GammaInitialize(&state, 2.0, 1.0)) {
- *       double gamma = PCG32Gamma(&state);
- *   }
- *   
- *   // Fast strict-range preset
- *   PCG32UniformSetStrictRange(&state, 0, 999);
- *   for (int i = 0; i < 100; ++i) {
- *       unsigned x = PCG32Uniform_StrictRangeUnchanged(&state);
- *   }
- *   
- *   // Basic random integer
- *   unsigned x = PCG32Uniform(&state, 10, 20);
- *   
- *   // Shuffle array (macro, type-generic)
- *   int myArray[100];
- *   PCG32UniformShuffle(&state, myArray, 100);
- *
- * AVX512 Batch Generation (compile with -mavx512f -mavx512dq):
- *
- *   #include "PCG32.h"
- *   
- *   // 1. __x16__PCG32SetSeed - Initialize 16 generators with seeds
- *   __x16__PCG32Struct avxState;
- *   __x16__SeedArray seeds = {
- *       0x123456789ABCDEF0ULL, 0x23456789ABCDEF01ULL,  // ... 16 seeds total
- *       // ... fill all 16 seeds
- *   };
- *   __x16__PCG32SetSeed(&avxState, seeds);
- *   
- *   // 2. __x16__PCG32 - Generate 16 random 32-bit integers
- *   __x16__UnsignedArray randoms;
- *   __x16__PCG32(&avxState, randoms);
- *   // randoms[0] through randoms[15] contain random 32-bit values
- *   
- *   // 3. __x16__PCG32UniformReal - Generate 16 uniform reals in [0, 1)
- *   __x16__DoubleArray uniforms;
- *   __x16__PCG32UniformReal(&avxState, uniforms);
- *   // uniforms[0] through uniforms[15] are in [0.0, 1.0)
- *   
- *   // 4. __x16__PCG32UniformSetStrictRange - Preset strict range for all lanes
- *   //    Range: [0, 999] for all 16 generators
- *   __x16__PCG32UniformSetStrictRange(&avxState, 0, 999);
- *   
- *   // 5. __x16__PCG32Uniform_StrictRangeUnchanged - Generate 16 integers from preset range
- *   __x16__UnsignedArray strictRandoms;
- *   for (int batch = 0; batch < 10; ++batch) {
- *       __x16__PCG32Uniform_StrictRangeUnchanged(&avxState, strictRandoms);
- *       // strictRandoms[0..15] are all in [0, 999]
- *       // Process the 16 random values...
- *   }
- *   // Note: For optimal performance with AVX512 strict range, the range should be
- *   // preset once with __x16__PCG32UniformSetStrictRange, then reuse it with
- *   // __x16__PCG32Uniform_StrictRangeUnchanged for many batches.
- * 
- *   // 6. Generate 16 uniform reals in custom range [min, max)
- *   __x16__DoubleArray customUniforms;
- *   __x16__PCG32UniformReal_MinMax(&avxState, -5.0, 5.0, customUniforms);
- *   // customUniforms[0..15] are all in [-5.0, 5.0)
- *
- * Complete AVX512 compilation example:
- *   g++ -O3 -mavx512f -mavx512dq -std=c++11 -o myapp main.cpp
- * 
+// Lightweight, high-performance pseudorandom number generator based on the PCG-XSH-RR algorithm,
+// offering excellent statistical quality and computational efficiency. Provides both C and C++
+// interfaces with full CUDA compatibility for GPU acceleration. Some function provides AVX512 
+// version. 
+// 
+// @author Pandora Eartha
+// @see https://github.com/PandoraEartha/HighPerformanceRandomEngine
+//
+// 
+// C API (prefix: PCG32)
+//
+// | Function                                    | Description                                   |
+// |---------------------------------------------|-----------------------------------------------|
+// | PCG32SetSingleSeed                          | Initialize generator with single seed         |
+// | PCG32SetMultipleSeeds                       | Initialize multiple generators with seeds     |
+// | PCG32                                       | Generate 32-bit uniform integer               |
+// | PCG32Uniform                                | Uniform integer [min, max] (auto-order)       |
+// | PCG32Uniform_Strict                         | Uniform integer (min <= max, gap not power-2) |
+// | PCG32UniformSetStrictRange                  | Preset strict range for repeated use          |
+// | PCG32Uniform_StrictRangeUnchanged           | Generate using preset strict range            |
+// | PCG32Uniform_MaxBiggerThanMin               | Fast uniform (assumes min <= max)             |
+// | PCG32UniformReal                            | Uniform real in [min, max)                    |
+// | PCG32StandardNormal                         | Standard normal N(0,1)                        |
+// | PCG32GammaInitialize                        | Initialize Gamma distribution (alpha >= 1)    |
+// | PCG32Gamma                                  | Generate Gamma(alpha, beta)                   |
+// | PCG32Binomial                               | Binomial(n, p)                                |
+// | PCG32PoissonInitialize                      | Initialize Poisson distribution               |
+// | PCG32Poisson                                | Generate Poisson(mu)                          |
+// | PCG32Exponential                            | Exponential(lambda)                           |
+// | PCG32PowerLaw                               | Power-law (min, alpha)                        |
+// | PCG32Geometric                              | Geometric(p)                                  |
+// | PCG32Geometric_SmallProbability             | Geometric(p) optimized for small p            |
+// | PCG32LogNormal                              | Log-normal(mu, sigma)                         |
+// | PCG32StandardLogNormal                      | Standard log-normal (mu=0, sigma=1)           |
+// | PCG32Benford                                | Benford's law (digits 1-12)                   |
+// | PCG32Benford_SpecificLength                 | Benford with specified digit length range     |
+// | PCG32RandomPointInSphere3D                  | Uniform point in 3D sphere                    |
+// | PCG32RandomPointInSphereNDimension          | Uniform point in N-dimensional sphere         |
+// | PCG32RandomPointInCycle                     | Uniform point in 2D circle                    |
+// | PCG32UniformSumReal                         | N uniform reals summing to a fixed value      |
+// | PCG32UniformShuffle                         | Fisher-Yates shuffle (macro, type-generic)    |
+// | PCG32UniformShuffle_FirstK                  | Fisher-Yates shuffle first K element          |
+// | PCG32TimeNanoeconds                         | Get current time in nanoseconds since epoch   |
+// 
+// Features:
+// - 32-bit uniform random integers [0, 0xFFFFFFFF]
+// - Uniform real numbers [min, max)
+// - Multiple integer uniform variants (general, strict, fast, preset-range)
+// - Standard normal distribution (Box-Muller transform)
+// - Gamma distribution (alpha >= 1, Marsaglia & Tsang method)
+// - Binomial distribution (efficient BTPE algorithm)
+// - Poisson distribution (saddlepoint approximation for large mu)
+// - Exponential distribution
+// - Power-law (Pareto) distribution
+// - Geometric distribution (standard + small-probability optimized)
+// - Log-normal distribution (standard + general)
+// - Benford's law distributed numbers
+// - N-dimensional uniform points in spheres
+// - Uniform points on/inside 2D circles
+// - Uniform simplex sampling (fixed-sum real variables)
+// - Fisher-Yates array shuffling (template for arbitrary types)
+// - Time-based seed generation via PCG32TimeNanoeconds
+//
+// AVX512 Vectorization Support
+//
+// When compiled with GCC or G++ on x86_64 platforms with AVX512F and AVX512DQ instruction sets,
+// the library provides SIMD functions that generate 16 random numbers simultaneously.
+//
+// Build flags: -mavx512f -mavx512dq -mfma
+//
+// AVX512 data types (64-byte aligned):
+//   __x16__StateArray    : 16 x uint64_t (generator states)
+//   __x16__SeedArray     : 16 x uint64_t (seeds)
+//   __x16__UnsignedArray : 16 x uint32_t (random integers)
+//   __x16__DoubleArray   : 16 x double   (random reals)
+//
+// AVX512 functions:
+//   __x16__PCG32SetSingleSeed                 : Initialize 16 generators with a seed array
+//   __x16__PCG32SetMultipleSeeds              : Initialize multiple 16-lane generator sets
+//   __x16__PCG32                              : Generate 16 random 32-bit integers
+//   __x16__PCG32UniformReal                   : Generate 16 uniform reals in [0,1)
+//   __x16__PCG32UniformReal_MinMax            : Generate 16 uniform reals in [min, max)
+//   __x16__PCG32UniformSetStrictRange         : Preset a strict range for all 16 lanes
+//   __x16__PCG32Uniform_StrictRangeUnchanged  : Generate 16 integers from preset range
+//   __x16__PCG32StandardNormal                : Generate 16 standard normal N(0,1) samples
+//   __x16__PCG32Normal                        : Generate 16 normal N(mu, sigma) samples
+//
+//
+// C++ Class API (PCG32PRNG)
+//
+// All C functions are wrapped as methods of the PCG32PRNG class. Template support
+// is provided for UniformShuffle and UniformShuffle_FirstK.
+//
+// CUDA Support
+//
+// All functions are decorated with PCG32_HOST_DEVICE, enabling direct usage within
+// CUDA kernel code. Simply include this header in your .cu files.
+//
+// Important Notes
+//
+// 1. Seed required: Always call PCG32SetSingleSeed/PCG32SetMultipleSeeds before generating numbers.
+// 2. Multi-threading: Use different PCG32Struct per thread with different seeds.
+// 3. Gamma restriction: Currently only supports shape parameter alpha >= 1.
+// 4. Performance tip: For repeated generation within the same integer range,
+//    use UniformSetStrictRange + Uniform_StrictRangeUnchanged for optimal speed.
+// 5. AVX512 restriction: AVX512 functions are only available with GCC/G++ on x86_64
+//    and require -mavx512f -mavx512dq  -mfma flags. They are not available in CUDA mode.
+//
+// Usage Examples
+//
+// C++ Interface:
+//
+//   #include "PCG32.h"
+//   
+//   // Basic initialization and uniform real
+//   PCG32PRNG rng(PCG32TimeNanoeconds(nullptr));
+//   double u = rng.UniformReal(-1.0, 1.0);  // uniform in [-1.0, 1.0)
+//   
+//   // Binomial distribution: 1000 trials with p=0.9
+//   unsigned binom = rng.Binomial(0.9, 1000);
+//   
+//   // Gamma distribution: must initialize first (alpha >= 1)
+//   rng.GammaInitialize(2.0, 1.0))           // alpha=2.0, beta=1.0
+//   double gamma = rng.Gamma();              // Gamma(2.0, 1.0) sample
+//   
+//   // Fast strict-range integer generation: preset range once, generate many times
+//   rng.UniformSetStrictRange(0, 999);       // preset range [0, 999]
+//   for (int i = 0; i < 100; ++i) {
+//       unsigned x = rng.Uniform_StrictRangeUnchanged();  // fast, no range checks
+//   }
+//   
+//   // Random integer with auto-range (min/max auto-sorted)
+//   unsigned x = rng.Uniform(10, 20);
+//   
+//   // Shuffle an array
+//   int myArray[100];
+//   rng.UniformShuffle(myArray, 100);
+//
+// C Interface:
+//
+//   #include "PCG32.h"
+//   
+//   PCG32Struct state;
+//   PCG32SetSingleSeed(&state, PCG32TimeNanoeconds(NULL));
+//   
+//   // Uniform real in [-1.0, 1.0)
+//   double u = PCG32UniformReal(&state, -1.0, 1.0);
+//   
+//   // Binomial: 1000 trials with p=0.9
+//   unsigned binom = PCG32Binomial(&state, 0.9, 1000);
+//   
+//   // Gamma: must initialize first
+//   if (PCG32GammaInitialize(&state, 2.0, 1.0)) {
+//       double gamma = PCG32Gamma(&state);
+//   }
+//   
+//   // Fast strict-range preset
+//   PCG32UniformSetStrictRange(&state, 0, 999);
+//   for (int i = 0; i < 100; ++i) {
+//       unsigned x = PCG32Uniform_StrictRangeUnchanged(&state);
+//   }
+//   
+//   // Basic random integer
+//   unsigned x = PCG32Uniform(&state, 10, 20);
+//   
+//   // Shuffle array (macro, type-generic)
+//   int myArray[100];
+//   PCG32UniformShuffle(&state, myArray, 100);
+//
+// Multi-threaded Seed Initialization with PCG32SetMultipleSeeds:
+//
+//   #include "PCG32.h"
+//   #include <omp.h>
+//   
+//   #define THREAD_NUMBER 32
+//
+//   // or use malloc or std::vector if THREAD_NUMBER is not a compile-time constant
+//   long long unsigned int seeds[THREAD_NUMBER]; 
+//   PCG32Struct status[THREAD_NUMBER];
+//   long long unsigned int time = PCG32TimeNanoeconds();
+//   
+//   // Generate distinct seeds for each thread
+//   for (unsigned threadIndex = 0; threadIndex < THREAD_NUMBER; threadIndex++) {
+//       seeds[threadIndex] = time + threadIndex * 0x123456789ABCDEFLLU + 1123;
+//   }
+//   
+//   // Initialize all generators with one call
+//   PCG32SetMultipleSeeds(status, seeds, THREAD_NUMBER);
+//   
+//   #pragma omp parallel num_threads(THREAD_NUMBER)
+//   {
+//       int tid = omp_get_thread_num();
+//       // Each thread uses its own generator
+//       double u = PCG32UniformReal(&status[tid], 0.0, 1.0);
+//       // ... generate more numbers ...
+//   }
+//
+// CUDA Seed Initialization with PCG32SetMultipleSeeds:
+
+//   #include "PCG32.h"
+//   
+//   // CUDA kernel - each thread processes its own generator
+//   __global__ void kernel(PCG32Struct* deviceStatus, unsigned* results, int N) {
+//       int idx = blockIdx.x * blockDim.x + threadIdx.x;
+//       if (idx >= N) return;
+//       
+//       // Each thread copies its status from device memory to local stack
+//       // (register/local memory is much faster than global memory)
+//       PCG32Struct localStatus = deviceStatus[idx];
+//       
+//       // Generate random numbers using local state
+//       for (int i = 0; i < 10; i++) {
+//           unsigned random = PCG32(&localStatus);
+//           results[idx * 10 + i] = random;
+//       }
+//       
+//       // Write back updated state if needed for subsequent kernel launches
+//       deviceStatus[idx] = localStatus;
+//   }
+//   
+//   int main() {
+//       const int N = 1024 * 1024;  // 1 million threads
+//       const int BLOCK_SIZE = 256;
+//       const int GRID_SIZE = (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
+//       
+//       // Host-side arrays
+//       long long unsigned int* seeds = (long long unsigned int*)malloc(N * sizeof(long long unsigned int));
+//       PCG32Struct* hostStatus = (PCG32Struct*)malloc(N * sizeof(PCG32Struct));
+//       unsigned* hostResults = (unsigned*)malloc(N * 10 * sizeof(unsigned));
+//       
+//       // Device-side arrays
+//       PCG32Struct* deviceStatus;
+//       unsigned* deviceResults;
+//       cudaMalloc(&deviceStatus, N * sizeof(PCG32Struct));
+//       cudaMalloc(&deviceResults, N * 10 * sizeof(unsigned));
+//       
+//       // Generate seeds on host
+//       long long unsigned int time = PCG32TimeNanoeconds();
+//       for (int i = 0; i < N; i++) {
+//           seeds[i] = time + i * 0x123456789ABCDEFLLU + 1123;
+//       }
+//       
+//       // Initialize all generators on host using PCG32SetMultipleSeeds
+//       PCG32SetMultipleSeeds(hostStatus, seeds, N);
+//       
+//       // Copy initialized generators to device
+//       cudaMemcpy(deviceStatus, hostStatus, N * sizeof(PCG32Struct), cudaMemcpyHostToDevice);
+//       
+//       // Launch kernel with proper grid configuration
+//       kernel<<<GRID_SIZE, BLOCK_SIZE>>>(deviceStatus, deviceResults, N);
+//       cudaDeviceSynchronize();
+//       
+//       // Copy results back
+//       cudaMemcpy(hostResults, deviceResults, N * 10 * sizeof(unsigned), cudaMemcpyDeviceToHost);
+//       
+//       // Clean up
+//       free(seeds);
+//       free(hostStatus);
+//       free(hostResults);
+//       cudaFree(deviceStatus);
+//       cudaFree(deviceResults);
+//       
+//       return 0;
+//   }
+//
+// AVX512 Batch Generation (compile with -mavx512f -mavx512dq):
+//
+//   #include "PCG32.h"
+//   
+//   // 1. __x16__PCG32SetSingleSeed - Initialize 16 generators with seeds
+//   __x16__PCG32Struct avxState;
+//   __x16__SeedArray seeds = {
+//       0x123456789ABCDEF0ULL, 0x23456789ABCDEF01ULL,  // ... 16 seeds total
+//       // ... fill all 16 seeds
+//   };
+//   __x16__PCG32SetSingleSeed(&avxState, seeds);
+//   
+//   // 2. __x16__PCG32 - Generate 16 random 32-bit integers
+//   __x16__UnsignedArray randoms;
+//   __x16__PCG32(&avxState, randoms);
+//   // randoms[0] through randoms[15] contain random 32-bit values
+//   
+//   // 3. __x16__PCG32UniformReal - Generate 16 uniform reals in [0, 1)
+//   __x16__DoubleArray uniforms;
+//   __x16__PCG32UniformReal(&avxState, uniforms);
+//   // uniforms[0] through uniforms[15] are in [0.0, 1.0)
+//   
+//   // 4. __x16__PCG32UniformSetStrictRange - Preset strict range for all lanes
+//   //    Range: [0, 999] for all 16 generators
+//   __x16__PCG32UniformSetStrictRange(&avxState, 0, 999);
+//   
+//   // 5. __x16__PCG32Uniform_StrictRangeUnchanged - Generate 16 integers from preset range
+//   __x16__UnsignedArray strictRandoms;
+//   for (int batch = 0; batch < 10; ++batch) {
+//       __x16__PCG32Uniform_StrictRangeUnchanged(&avxState, strictRandoms);
+//       // strictRandoms[0..15] are all in [0, 999]
+//       // Process the 16 random values...
+//   }
+//   // Note: For optimal performance with AVX512 strict range, the range should be
+//   // preset once with __x16__PCG32UniformSetStrictRange, then reuse it with
+//   // __x16__PCG32Uniform_StrictRangeUnchanged for many batches.
+// 
+//   // 6. Generate 16 uniform reals in custom range [min, max)
+//   __x16__DoubleArray customUniforms;
+//   __x16__PCG32UniformReal_MinMax(&avxState, -5.0, 5.0, customUniforms);
+//   // customUniforms[0..15] are all in [-5.0, 5.0)
+//
+//   // 7. Generate 16 standard normal N(0,1) samples
+//   __x16__DoubleArray normalSamples;
+//   __x16__PCG32StandardNormal(&avxState, normalSamples);
+//   // normalSamples[0..15] are standard normal distributed
+//   
+//   // 8. Generate 16 normal N(mu, sigma) samples
+//   __x16__DoubleArray customNormalSamples;
+//   __x16__PCG32Normal(&avxState, customNormalSamples, 2.0, 0.5);
+//   // customNormalSamples[0..15] are N(2.0, 0.5) distributed
+//
+// AVX512 Multi-threaded Seed Initialization:
+//
+//   #include "PCG32.h"
+//   #include <omp.h>
+//
+//   #define THREAD_NUMBER 32
+//
+//   // or use malloc or std::vector if THREAD_NUMBER is not a compile-time constant
+//   __x16__SeedArray AVX512Seeds[THREAD_NUMBER];
+//   __x16__PCG32Struct AVX512Status[THREAD_NUMBER];
+//   long long unsigned int time = PCG32TimeNanoeconds();
+//   
+//   // Generate distinct seeds for each thread
+//   for (unsigned threadIndex = 0; threadIndex < THREAD_NUMBER; threadIndex++) {
+//       for (unsigned index = 0; index < 16; index++) {
+//           AVX512Seeds[threadIndex][index] = time + threadIndex * 0x123456789ABCDEFLLU + index;
+//       }
+//   }
+//   
+//   // Initialize all generators for scalar and AVX512 usage
+//   __x16__PCG32SetMultipleSeeds(AVX512Status, AVX512Seeds, THREAD_NUMBER);
+//   
+//   #pragma omp parallel num_threads(THREAD_NUMBER)
+//   {
+//       int tid = omp_get_thread_num();
+//       
+//       // AVX512 generator for this thread (generates 16 values at once)
+//       __x16__DoubleArray avxUniforms;
+//       __x16__PCG32UniformReal(&AVX512Status[tid], avxUniforms);
+//       // Process 16 random values...
+//   }
+//
+// Complete AVX512 compilation example:
+//   g++ -O3 -mavx512f -mavx512dq -mfma -std=c++11 -o myapp main.cpp
+// 
  */
 
 #ifndef __PCG32_H__
 #define __PCG32_H__
+
+#if defined(__cplusplus)||PCG32_CUDA
+    #define PCG32CXX 1
+#else
+    #define PCG32CXX 0
+#endif
 
 #if defined(__CUDACC__)||defined(__CUDA_ARCH__)||defined(__CUDA_LIBDEVICE__)
     #define PCG32_CUDA 1
@@ -235,6 +385,7 @@
     #include <cuda_runtime_api.h>
     #include <limits>
     #include <float.h>
+    #include <time.h>
 #else
     #define PCG32_HOST_DEVICE
     #define PCG32_DEVICE
@@ -243,6 +394,7 @@
     #include <stdbool.h>
     #include <float.h>
     #include <stdio.h>
+    #include <time.h>
 #endif
 
 #if PCG32_CUDA
@@ -261,12 +413,16 @@
     static const double PCG32REAL_SCALE=(double)1/(double)(PCG32MAX+1);
 #endif
 
+#if defined(__GNUC__)||defined(__clang__)
+    #define PCG32_DEPRECATED(message) __attribute__((deprecated(message)))
+#elif defined(_MSC_VER)
+    #define PCG32_DEPRECATED(message) __declspec(deprecated(message))
+#else
+    #define PCG32_DEPRECATED(message)
+#endif
+
 #define PCG32_INT_MAX      0x7FFFFFFFU
 #define PCG32_UNSIGNED_MAX 0xFFFFFFFFU
-
-#define PCG32BINOMIAL_SMALLMEAN    14
-#define PCG32BINOMIAL_MAXITERATION 110
-#define PCG32BINOMIAL_FARFROMMENA  20
 
 typedef struct PCG32Struct{
     long long unsigned int state;
@@ -297,6 +453,114 @@ typedef struct PCG32Struct{
         double cx2;
     }Poisson;
 }PCG32Struct;
+
+
+// Auxiliary C Functions
+PCG32_HOST_DEVICE static inline unsigned rotr32(unsigned x,unsigned r);
+PCG32_HOST_DEVICE static inline long long unsigned int PCG32NextPrime(long long unsigned int prime);
+// This function requires that the inputs a and b be coprime.
+PCG32_HOST_DEVICE static inline unsigned PCG32ModInverse(unsigned a,unsigned b);
+// get nanoeconds from 1970.1.1 00:00:00 UTC
+PCG32_HOST        static inline long long unsigned int PCG32TimeNanoeconds();
+// 0 < x, no use
+PCG32_HOST_DEVICE static inline double PCG32Ln(const double x);
+PCG32_HOST_DEVICE static inline double PCG32PowerUnsigned(double x,unsigned n);
+PCG32_HOST_DEVICE static inline double PCG32LnStirlingLeft(const double x);
+// only accept x > 0
+PCG32_HOST_DEVICE static inline double PCG32LnStirling(double x);
+
+
+// Random Number Generator C Funtions (Prefix: PCG32)
+PCG32_HOST_DEVICE static inline unsigned PCG32(PCG32Struct* status);
+// Use PCG32SetSingleSeed for single seed, or PCG32SetMultipleSeeds for multiple seeds.
+PCG32_HOST_DEVICE static inline void     PCG32SetSingleSeed(PCG32Struct* status,const long long unsigned int seed);
+PCG32_HOST        static inline void     PCG32SetMultipleSeeds(PCG32Struct* statusArray,const long long unsigned int* baseSeeds,const unsigned count);
+PCG32_HOST_DEVICE static inline unsigned PCG32Uniform(PCG32Struct* status,unsigned min,unsigned max);
+// max can not smaller than min and gap can not be power of 2
+PCG32_HOST_DEVICE static inline unsigned PCG32Uniform_Strict(PCG32Struct* status,const unsigned min,const unsigned max);
+PCG32_HOST_DEVICE static inline unsigned PCG32Uniform_StrictRangeUnchanged(PCG32Struct* status);
+PCG32_HOST_DEVICE static inline void     PCG32UniformSetStrictRange(PCG32Struct* status,const unsigned min,const unsigned max);
+// max can not smaller than min
+PCG32_HOST_DEVICE static inline unsigned PCG32Uniform_MaxBiggerThanMin(PCG32Struct* status,const unsigned min,const unsigned max);
+PCG32_HOST_DEVICE static inline double   PCG32UniformReal(PCG32Struct* status,const double min,const double max);
+// undefined behavior if length of xy < 2
+PCG32_HOST_DEVICE static inline void     PCG32RandomPointInCycle(PCG32Struct* status,const double radius,double* xy);
+// undefined behavior if length of xy < 2
+PCG32_HOST_DEVICE static inline void     PCG32RandomPointInCycle_NonCenter(PCG32Struct* status,const double radius,double* xy);
+PCG32_HOST_DEVICE static inline double   PCG32StandardNormal(PCG32Struct* status);
+// undefined behavior if length of random < 2
+PCG32_HOST_DEVICE static inline void     PCG32StandardNormal2D(PCG32Struct* status,double random[2]);
+// undefined behavior if length of random < 3
+PCG32_HOST_DEVICE static inline void     PCG32StandardNormal3D(PCG32Struct* status,double random[3]);
+// undefined behavior if length of random < n
+PCG32_HOST_DEVICE static inline void     PCG32StandardNormalNDimension(PCG32Struct* status,const unsigned n,double* random);
+// undefined behavior if length of xyz < 3 
+PCG32_HOST_DEVICE static inline void     PCG32RandomPointInSphere3D(PCG32Struct* status,const double radius,double* xyz);
+// undefined behavior if length of coordinate < dimension
+PCG32_HOST_DEVICE static inline void     PCG32RandomPointInSphereNDimension(PCG32Struct* status,const double radius,const unsigned dimension,double* coordinate);
+// Currently, only the algorithm for a >= 1 has been implemented
+PCG32_HOST_DEVICE static inline bool     PCG32GammaInitialize(PCG32Struct* status,const double alpha,const double beta);
+PCG32_HOST_DEVICE static inline double   PCG32Gamma(PCG32Struct* status);
+PCG32_HOST_DEVICE static inline unsigned PCG32Binomial(PCG32Struct* status,double probability,const unsigned repeatUnsigned);
+PCG32_HOST_DEVICE static inline double   PCG32Exponential(PCG32Struct* status,const double lambda);
+PCG32_HOST_DEVICE static inline double   PCG32PowerLaw(PCG32Struct* status,const double min,const double alpha);
+PCG32_HOST_DEVICE static inline bool     PCG32PoissonInitialize(PCG32Struct* status,const double mu);
+PCG32_HOST_DEVICE static inline unsigned PCG32Poisson(PCG32Struct* status);
+PCG32_HOST_DEVICE static inline double   PCG32StandardLogNormal(PCG32Struct* status);
+PCG32_HOST_DEVICE static inline double   PCG32LogNormal(PCG32Struct* status,const double mu,const double sigma);
+PCG32_HOST_DEVICE static inline double   PCG32Benford_SpecificLength(PCG32Struct* status,const unsigned minDigitalLength,const unsigned maxDigitalLength);
+PCG32_HOST_DEVICE static inline double   PCG32Benford(PCG32Struct* status);
+// n >= 1, undefined behivor if length of variables < n
+PCG32_HOST_DEVICE static inline void     PCG32UniformSumReal(PCG32Struct* status,const unsigned n,const double sum,double* variables);
+PCG32_HOST_DEVICE static inline unsigned PCG32Geometric(PCG32Struct* status,const double probability);
+PCG32_HOST_DEVICE static inline unsigned PCG32Geometric_SmallProbability(PCG32Struct* status,const double probability);
+// sum of probabilities must be 1
+PCG32_HOST_DEVICE static inline unsigned PCG32MultinomialSampling(PCG32Struct* status,const double* probabilities,const unsigned length);
+// sum of probabilities must be 1
+PCG32_HOST_DEVICE static inline void     PCG32MultinomialSamplingCount(PCG32Struct* status,const double* probabilities,const unsigned length,const unsigned count,unsigned* result);
+
+
+// AVX512 C Functions 
+#if PCG32_AVX512
+
+#include <immintrin.h>
+
+// MUST BE BUILD WITH: g++/gcc -mavx512f -mavx512dq -mfma
+
+typedef struct __x16__PCG32Struct{
+    __m512i state0;
+    __m512i state1;
+    unsigned uniformStrictRange;
+    unsigned uniformStrictM;
+    unsigned uniformStrictShift;
+    unsigned uniformStrictMin;
+    unsigned uniformStrictGap;
+}__attribute__((aligned(64))) __x16__PCG32Struct;
+
+typedef __attribute__((aligned(64))) long long unsigned int __x16__StateArray[16];
+typedef __attribute__((aligned(64))) long long unsigned int __x16__SeedArray[16];
+typedef __attribute__((aligned(64))) unsigned               __x16__UnsignedArray[16];
+typedef __attribute__((aligned(64))) double                 __x16__DoubleArray[16];
+
+// Auxiliary C Functions
+static inline __m512i U32VectorMultipleU32High32(const __m512i a,const unsigned b);
+static inline __m512d __x8__PCG32Sin(const __m512d x);
+static inline __m512d __x8__PCG32Cos(const __m512d x);
+static inline __m512d __x8__PCG32Ln(const __m512d x);
+static inline __m512d m512dRightShift(__m512d x,const unsigned shift64);
+
+// Random Number Generator C Funtions (Prefix: __x16__PCG32)
+static inline void __x16__PCG32(__x16__PCG32Struct* status,__x16__UnsignedArray random);
+static inline void __x16__PCG32SetSingleSeed(__x16__PCG32Struct* status,__x16__SeedArray seed);
+static inline void __x16__PCG32SetMultipleSeeds(__x16__PCG32Struct* status,__x16__SeedArray baseSeed[],const unsigned count);
+static inline void __x16__PCG32UniformReal(__x16__PCG32Struct* status,__x16__DoubleArray random);
+static inline void __x16__PCG32UniformReal_MinMax(__x16__PCG32Struct* status,const double min,const double max,__x16__DoubleArray random);
+static inline void __x16__PCG32UniformSetStrictRange(__x16__PCG32Struct* status,const unsigned min,const unsigned max);
+static inline void __x16__PCG32Uniform_StrictRangeUnchanged(__x16__PCG32Struct* status,__x16__UnsignedArray random);
+static inline void __x16__PCG32Normal(__x16__PCG32Struct* status,__x16__DoubleArray random,const double mu,const double sigma);
+static inline void __x16__PCG32StandardNormal(__x16__PCG32Struct* status,__x16__DoubleArray random);
+
+#endif
 
 #if defined(__cplusplus)||PCG32_CUDA
 
@@ -352,10 +616,6 @@ using PCG32PseudoRandomNumberGenerator=PCG32PRNG;
 extern "C"{
 #endif
 
-PCG32_HOST_DEVICE static inline unsigned rotr32(unsigned x,unsigned r){
-    return x>>r|x<<(-r&31);
-}
-
 PCG32_HOST_DEVICE static inline unsigned PCG32(PCG32Struct* status){
     long long unsigned int x=status->state;
     unsigned count=(unsigned)(x>>59);
@@ -364,10 +624,28 @@ PCG32_HOST_DEVICE static inline unsigned PCG32(PCG32Struct* status){
     return rotr32((unsigned)(x>>27),count);
 }
 
+PCG32_DEPRECATED("Use PCG32SetSingleSeed for single seed, or PCG32SetMultipleSeeds for multiple seeds.")
 PCG32_HOST_DEVICE static inline void PCG32SetSeed(PCG32Struct* status,const long long unsigned int seed){
     status->state=seed+PCG32INCREMENT;
     status->normalDistributionSavedValid=PCG32FALSE;
     PCG32(status);
+}
+
+PCG32_HOST_DEVICE static inline void PCG32SetSingleSeed(PCG32Struct* status,const long long unsigned int seed){
+    status->state=seed+PCG32INCREMENT;
+    status->normalDistributionSavedValid=PCG32FALSE;
+    PCG32(status);
+}
+
+PCG32_HOST static inline void PCG32SetMultipleSeeds(PCG32Struct* statusArray,const long long unsigned int* baseSeeds,const unsigned count){
+    unsigned prime=0;
+    for(unsigned index=0;index<count;index=index+1){
+        PCG32SetSingleSeed(statusArray+index,baseSeeds[index]);
+        prime=PCG32NextPrime(prime);
+        for(unsigned step=0;step<prime;step=step+1){
+            PCG32(statusArray+index);
+        }
+    }
 }
 
 PCG32_HOST_DEVICE static inline unsigned PCG32Uniform(PCG32Struct* status,unsigned min,unsigned max){
@@ -433,88 +711,6 @@ PCG32_HOST_DEVICE static inline double PCG32UniformReal(PCG32Struct* status,cons
     return min+((double)PCG32(status))*PCG32REAL_SCALE*(max-min);
 }
 
-// This function requires that the inputs a and b be coprime.
-PCG32_HOST_DEVICE static inline unsigned PCG32ModInverse(unsigned a,unsigned b){
-    const long long m=b;
-    long long x=1;
-    long long lasxX=0;
-    while(b){
-        const long long quotient=a/b;
-        long long temporary=a%b;
-        a=b;
-        b=temporary;
-        temporary=x-quotient*lasxX;
-        x=lasxX;
-        lasxX=temporary;
-    }
-    if(a==1){
-        return (x%m+m)%m;
-    }
-    return -1;
-}
-
-// 0 < x
-PCG32_HOST_DEVICE static inline double PCG32Ln(const double x){
-    union{
-        double d;
-        long long unsigned int u;
-    }u={x};
-    const int exp2=((int)(u.u>>52)&0b011111111111)-1023;
-    const double ln2=0.69314718055994530941723212145817656807550013436025525412068L;
-    const double exp2ln2=exp2*ln2;
-    u.u=u.u|(1023LLU<<52);
-    const unsigned scale=(unsigned)((u.d-1)*20);
-    static const double dive[20]={
-                                                                   1.0L,
-        0.952380952380952380952380952380952380952380952380952380952381L,
-        0.909090909090909090909090909090909090909090909090909090909091L,
-        0.869565217391304347826086956521739130434782608695652173913043L,
-        0.833333333333333333333333333333333333333333333333333333333333L,
-                                                                   0.8L,
-        0.769230769230769230769230769230769230769230769230769230769231L,
-        0.740740740740740740740740740740740740740740740740740740740741L,
-        0.714285714285714285714285714285714285714285714285714285714286L,
-        0.689655172413793103448275862068965517241379310344827586206897L,
-        0.666666666666666666666666666666666666666666666666666666666667L,
-        0.645161290322580645161290322580645161290322580645161290322581L,
-                                                                 0.625L,
-        0.606060606060606060606060606060606060606060606060606060606061L,
-        0.588235294117647058823529411764705882352941176470588235294118L,
-        0.571428571428571428571428571428571428571428571428571428571429L,
-        0.555555555555555555555555555555555555555555555555555555555556L,
-        0.540540540540540540540540540540540540540540540540540540540541L,
-        0.526315789473684210526315789473684210526315789473684210526316L,
-        0.512820512820512820512820512820512820512820512820512820512821L
-    };
-    static const double add[20]={
-        0                                                               ,
-        0.0487901641694320030653744042231646586079736644155824100400766L,
-        0.0953101798043248600439521232807650922206053653086441991852398L,
-         0.139761942375158697371529255667655342765778691851407511844627L,
-         0.182321556793954626211718025154514633197389337914486983942726L,
-         0.223143551314209755766295090309834503374601085548007213671288L,
-         0.262364264467491052035495986880954397204166456131434140385718L,
-         0.300104592450338080750512134625036338265870050479220125050075L,
-         0.336472236621212930504593410216992090111483375313343466546742L,
-         0.371563556432483033748048456219370829817911290933715848767662L,
-         0.405465108108164381978013115464349136571990423462494197614014L,
-          0.43825493093115525249394074839981643477333730749156374160271L,
-         0.470003629245735553650937031148342064700899048812248040449392L,
-         0.500775287912489242021965238745114228792595788771138396799254L,
-          0.53062825106217039623154316318876232798710152395697181126391L,
-          0.55961578793542268627088850052682659348608446086135068021803L,
-         0.587786664902119008189731140618863769769379761376981181556741L,
-         0.615185639090233450932872094888906388223475964178607933490905L,
-         0.641853886172394775991035977203489329636277772670355842504632L,
-         0.667829372575655434013509102345303533776156879593928337999732L
-    };
-    u.d=u.d*dive[scale];
-    const double toAdd=exp2ln2+add[scale];
-    const double order=(u.d-1.0)/(u.d+1.0);
-    const double order2=order*order;
-    return ((((2.0/9.0*order2+2.0/7.0)*order2+2.0/5.0)*order2+2.0/3.0)*order2+2.0)*order+toAdd;
-}
-
 // undefined behavior if length of xy < 2
 PCG32_HOST_DEVICE static inline void PCG32RandomPointInCycle(PCG32Struct* status,const double radius,double* xy){
     const double Pi2=6.2831853071795864769252867665590057683943387987502L;
@@ -556,6 +752,51 @@ PCG32_HOST_DEVICE static inline double PCG32StandardNormal(PCG32Struct* status){
     status->normalDistributionSavedValid=PCG32TRUE;
     status->normalDistributionSaved=toMultiple*u2;
     return toMultiple*u1;
+}
+
+// undefined behavior if length of random < 2
+PCG32_HOST_DEVICE static inline void PCG32StandardNormal2D(PCG32Struct* status,double random[2]){
+    double u1,u2,S;
+    do{
+        u1=PCG32UniformReal(status,-1,1);
+        u2=PCG32UniformReal(status,-1,1);
+        S=u1*u1+u2*u2;
+    }while(S>1.0||S==0.0);
+    const double toMultiple=sqrt(-2.0*log(S)/S);
+    random[0]=toMultiple*u1;
+    random[1]=toMultiple*u2;
+}
+
+// undefined behavior if length of random < 3
+PCG32_HOST_DEVICE static inline void PCG32StandardNormal3D(PCG32Struct* status,double random[3]){
+    double u1,u2,S;
+    do{
+        u1=PCG32UniformReal(status,-1,1);
+        u2=PCG32UniformReal(status,-1,1);
+        S=u1*u1+u2*u2;
+    }while(S>1.0||S==0.0);
+    const double toMultiple=sqrt(-2.0*log(S)/S);
+    random[0]=toMultiple*u1;
+    random[1]=toMultiple*u2;
+    random[2]=PCG32StandardNormal(status);
+}
+
+// undefined behavior if length of random < n
+PCG32_HOST_DEVICE static inline void PCG32StandardNormalNDimension(PCG32Struct* status,const unsigned n,double* random){
+    for(unsigned index=0;index<n;index=index+2){
+        double u1,u2,S;
+        do{
+            u1=PCG32UniformReal(status,-1,1);
+            u2=PCG32UniformReal(status,-1,1);
+            S=u1*u1+u2*u2;
+        }while(S>1.0||S==0.0);
+        const double toMultiple=sqrt(-2.0*log(S)/S);
+        random[index+0]=toMultiple*u1;
+        random[index+1]=toMultiple*u2;
+    }
+    if(n&1){
+        random[n-1]=PCG32StandardNormal(status);
+    }
 }
 
 // undefined behavior if length of xyz < 3 
@@ -620,43 +861,10 @@ PCG32_HOST_DEVICE static inline double PCG32Gamma(PCG32Struct* status){
     }
 }
 
-PCG32_HOST_DEVICE static inline double PCG32PowerUnsigned(double x,unsigned n){
-    double power=1.0;
-    do{
-        if(n&1){
-            power=power*x;
-        }
-        n=n>>1;
-        x=x*x;
-    }while(n);
-    return power;
-}
-
-PCG32_HOST_DEVICE static inline double PCG32LnStirlingLeft(const double x){
-    static const double C[5]={1.0/12,-1.0/360,1.0/1260,-1.0/1680,1.0/1188};
-    double xPower[5]; // x^1, x^3, x^5, x^7, x^9
-    xPower[0]=1.0/x;
-    const double x2=xPower[0]*xPower[0];
-    xPower[1]=xPower[0]*x2;
-    xPower[2]=xPower[1]*x2;
-    xPower[3]=xPower[2]*x2;
-    xPower[4]=xPower[3]*x2;
-    return C[0]*xPower[0]+C[1]*xPower[1]+C[2]*xPower[2]+C[3]*xPower[3]+C[4]*xPower[4];
-}
-
-// only accept x > 0
-PCG32_HOST_DEVICE static inline double PCG32LnStirling(double x){
-    double sub=0.0;
-    while(x<12){
-        sub=sub+log(x);
-        x=x+1;
-    }
-    const double ln2Pidive2=0.91893853320467274178032973640561763986139747363778341L;
-    const double lnx=log(x);
-    return ln2Pidive2+lnx*0.5+x*(lnx-1.0)+PCG32LnStirlingLeft(x)-sub;
-}
-
 PCG32_HOST_DEVICE static inline unsigned PCG32Binomial(PCG32Struct* status,double probability,const unsigned repeatUnsigned){
+    const unsigned PCG32BINOMIAL_SMALLMEAN=14;
+    const unsigned PCG32BINOMIAL_MAXITERATION=110;
+    const unsigned PCG32BINOMIAL_FARFROMMENA=20;
     int repeats[2]={0,0};
     unsigned result=0;
     if(repeatUnsigned>PCG32_INT_MAX){
@@ -1048,25 +1256,9 @@ PCG32_HOST_DEVICE static inline void PCG32MultinomialSamplingCount(PCG32Struct* 
 #if PCG32_AVX512
 
 #include <immintrin.h>
+#include <stdatomic.h> // for m512dLeftShift compile by GCC 
 
-// MUST BE BUILD WITH: g++/gcc -mavx512f -mavx512dq
-
-typedef struct __x16__PCG32Struct{
-    __m512i state0;
-    __m512i state1;
-    __m512i normalDistributionSaved;
-    unsigned uniformStrictRange;
-    unsigned uniformStrictM;
-    unsigned uniformStrictShift;
-    unsigned uniformStrictMin;
-    unsigned uniformStrictGap;
-    bool normalDistributionSavedValid;
-}__attribute__((aligned(64))) __x16__PCG32Struct;
-
-typedef __attribute__((aligned(64))) long long unsigned int __x16__StateArray[16];
-typedef __attribute__((aligned(64))) long long unsigned int __x16__SeedArray[16];
-typedef __attribute__((aligned(64))) unsigned               __x16__UnsignedArray[16];
-typedef __attribute__((aligned(64))) double                 __x16__DoubleArray[16];
+// MUST BE BUILD WITH: g++/gcc -mavx512f -mavx512dq -mfma
 
 #define PCG32_AVX512_PCG32_INTRINSIC_LOAD_CONSTANT \
     const __m512i add     =_mm512_set1_epi64(PCG32INCREMENT);                                 \
@@ -1118,12 +1310,29 @@ typedef __attribute__((aligned(64))) double                 __x16__DoubleArray[1
         random1=_mm512_mul_pd(x1Double,_mm512_castsi512_pd(multipleDouble));                  \
     }
 
+#define PCG32_AVX512_UNIFORM_REAL_MIN_MAX_INTRINSIC(min,max) \
+    {                                                                                         \
+        union DoubleLLU{                                                                      \
+            double d;                                                                         \
+            long long unsigned int u;                                                         \
+        }MinUnion,MaxUnion;                                                                   \
+        MinUnion.d=min;                                                                       \
+        MaxUnion.d=max;                                                                       \
+        const __m512d minv=_mm512_castsi512_pd(_mm512_set1_epi64(MinUnion.u));                \
+        const __m512d maxv=_mm512_castsi512_pd(_mm512_set1_epi64(MaxUnion.u));                \
+        const __m512d gapv=_mm512_sub_pd(maxv,minv);                                          \
+        random0=_mm512_mul_pd(random0,gapv);                                                  \
+        random1=_mm512_mul_pd(random1,gapv);                                                  \
+        random0=_mm512_add_pd(random0,minv);                                                  \
+        random1=_mm512_add_pd(random1,minv);                                                  \
+    }
+
 static inline void __x16__PCG32(__x16__PCG32Struct* status,__x16__UnsignedArray random){
     PCG32_AVX512_PCG32_INTRINSIC
     _mm512_store_epi64(random,x);
 }
 
-static inline void __x16__PCG32SetSeed(__x16__PCG32Struct* status,const __x16__SeedArray seed){
+static inline void __x16__PCG32SetSingleSeed(__x16__PCG32Struct* status,__x16__SeedArray seed){
     const __m512i seed0=_mm512_set_epi64(seed[ 7],seed[ 6],seed[ 5],seed[ 4],seed[ 3],seed[ 2],seed[ 1],seed[ 0]);
     const __m512i seed1=_mm512_set_epi64(seed[15],seed[14],seed[13],seed[12],seed[11],seed[10],seed[ 9],seed[ 8]);
     const __m512i add=_mm512_set_epi64(PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT);
@@ -1131,6 +1340,22 @@ static inline void __x16__PCG32SetSeed(__x16__PCG32Struct* status,const __x16__S
     status->state1=_mm512_add_epi64(seed1,add);
     __x16__UnsignedArray random;
     __x16__PCG32(status,random);
+}
+
+static inline void __x16__PCG32SetMultipleSeeds(__x16__PCG32Struct* status,__x16__SeedArray baseSeed[],const unsigned count){
+    PCG32Struct scalarStatus[16];
+    unsigned prime=0;
+    for(unsigned indexStatus=0;indexStatus<count;indexStatus=indexStatus+1){
+        for(unsigned index=0;index<sizeof(__x16__SeedArray)/sizeof(baseSeed[0][0]);index=index+1){
+            PCG32SetSingleSeed(scalarStatus+index,baseSeed[indexStatus][index]);
+            prime=PCG32NextPrime(prime);
+            for(unsigned step=0;step<prime;step=step+1){
+                PCG32(scalarStatus+index);
+            }
+            baseSeed[indexStatus][index]=scalarStatus[index].state;
+        }
+        __x16__PCG32SetSingleSeed(status+indexStatus,baseSeed[indexStatus]);
+    }
 }
 
 // 0 <= random < 1
@@ -1142,21 +1367,9 @@ static inline void __x16__PCG32UniformReal(__x16__PCG32Struct* status,__x16__Dou
 }
 
 static inline void __x16__PCG32UniformReal_MinMax(__x16__PCG32Struct* status,const double min,const double max,__x16__DoubleArray random){
-    PCG32_AVX512_PCG32_INTRINSIC
-    PCG32_AVX512_UNIFORM_REAL_INTRINSIC
-    union DouleLLU{
-        double d;
-        long long unsigned int u;
-    }MinUnion,MaxUnion;
-    MinUnion.d=min;
-    MaxUnion.d=max;
-    const __m512d minv=_mm512_castsi512_pd(_mm512_set1_epi64(MinUnion.u));
-    const __m512d maxv=_mm512_castsi512_pd(_mm512_set1_epi64(MaxUnion.u));
-    const __m512d gapv=_mm512_sub_pd(maxv,minv);
-    random0=_mm512_mul_pd(random0,gapv);
-    random1=_mm512_mul_pd(random1,gapv);
-    random0=_mm512_add_pd(random0,minv);
-    random1=_mm512_add_pd(random1,minv);
+    PCG32_AVX512_PCG32_INTRINSIC                                                              
+    PCG32_AVX512_UNIFORM_REAL_INTRINSIC                                                
+    PCG32_AVX512_UNIFORM_REAL_MIN_MAX_INTRINSIC(min,max)
     _mm512_store_pd(random+0,random0);
     _mm512_store_pd(random+8,random1);
 }
@@ -1289,6 +1502,287 @@ static inline void __x16__PCG32UniformSetStrictRange(__x16__PCG32Struct* status,
     status->uniformStrictMin=min;
     status->uniformStrictM=(unsigned)M;
     status->uniformStrictGap=gap;
+}
+
+#define PCG32_AVX512_SET_DOUBLE_LLU(x) _mm512_castsi512_pd(_mm512_set1_epi64(x))
+
+/**
+ * -pi/2 <= x <= pi/2
+ * x1*(0.99999999999999999974277490079943975 + 
+ * x2*(-0.166666666666666650522767323353840604 + 
+ * x2*(0.00833333333333316503140948668861163462 + 
+ * x2*(-0.00019841269841201840459252750531485886 + 
+ * x2*(2.75573192101527564362114785169078252e-6 + 
+ * x2*(-2.50521067982746148969440582709985054e-8 + 
+ * x2*(1.60589364903732230834314189302038183e-10 + 
+ * x2*(-7.64291780693694318128770390349958602e-13 + 
+ * 2.72047909631134875287705126898888084e-15*x2))))))))
+ */
+static inline __m512d __x8__PCG32Sin(const __m512d x){
+    const __m512d x1=x;
+    const __m512d x2=_mm512_mul_pd(x1,x1);
+    return 
+    _mm512_mul_pd(x1,
+        _mm512_fmadd_pd(x2,
+            _mm512_fmadd_pd(x2,
+                _mm512_fmadd_pd(x2,
+                    _mm512_fmadd_pd(x2,
+                        _mm512_fmadd_pd(x2,
+                            _mm512_fmadd_pd(x2,
+                                _mm512_fmadd_pd(x2,
+                                    _mm512_fmadd_pd(x2,PCG32_AVX512_SET_DOUBLE_LLU(0x3CE880FF69A815D1LLU),PCG32_AVX512_SET_DOUBLE_LLU(0xBD6AE420DC08FB2ALLU)),
+                                    PCG32_AVX512_SET_DOUBLE_LLU(0x3DE6123C686AD6A8LLU)
+                                ),
+                                PCG32_AVX512_SET_DOUBLE_LLU(0xBE5AE6454B5DC0B5LLU)
+                            ),
+                            PCG32_AVX512_SET_DOUBLE_LLU(0x3EC71DE3A524F063LL)
+                        ),
+                        PCG32_AVX512_SET_DOUBLE_LLU(0xBF2A01A01A013E1ALLU)
+                    ),
+                    PCG32_AVX512_SET_DOUBLE_LLU(0x3F811111111110B0LLU)
+                ),
+                PCG32_AVX512_SET_DOUBLE_LLU(0xBFC5555555555555LLU)
+            ),
+            PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU)
+        )
+    );
+}
+
+/**
+ * 0.99999999999999998243004448007448662 + 
+ * x2*(-0.499999999999999105881272803474436268 + 
+ * x2*(0.041666666666658914344068844317924505 + 
+ * x2*(-0.00138888888886231429175747130897185107 + 
+ * x2*(0.0000248015872549765577961155967511699095 + 
+ * x2*(-2.75573145508960795189972565635584642e-7 + 
+ * x2*(2.08764776731016710219609723288490596e-9 + 
+ * x2*(-1.14608862231521440480830153964369191e-11 + 
+ * 4.58927688754481747776178904291483144e-14*x2)))))))
+ */
+static inline __m512d __x8__PCG32Cos(const __m512d x){
+    const __m512d x2=_mm512_mul_pd(x,x);
+    return 
+    _mm512_fmadd_pd(x2,
+        _mm512_fmadd_pd(x2,
+            _mm512_fmadd_pd(x2,
+                _mm512_fmadd_pd(x2,
+                    _mm512_fmadd_pd(x2,
+                        _mm512_fmadd_pd(x2,
+                            _mm512_fmadd_pd(x2,
+                                _mm512_fmadd_pd(x2,PCG32_AVX512_SET_DOUBLE_LLU(0x3D29D5D853164598LLU),PCG32_AVX512_SET_DOUBLE_LLU(0xBDA933E7C608646FLLU)),
+                                PCG32_AVX512_SET_DOUBLE_LLU(0x3E21EEC9369F3E5DLL)
+                            ),
+                            PCG32_AVX512_SET_DOUBLE_LLU(0xBE927E4F82DB5BB1LLU)
+                        ),
+                        PCG32_AVX512_SET_DOUBLE_LLU(0x3EFA01A0192FB593LLU)
+                    ),
+                    PCG32_AVX512_SET_DOUBLE_LLU(0xBF56C16C16BF8D5DLLU)
+                ),
+                PCG32_AVX512_SET_DOUBLE_LLU(0x3FA55555555550F8LLU)
+            ),
+            PCG32_AVX512_SET_DOUBLE_LLU(0xBFDFFFFFFFFFFFF0LLU)
+        ),
+        PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU)
+    );
+}
+
+// 0 < x <= 1
+static inline __m512d __x8__PCG32Ln(const __m512d x){
+    #if 1
+    __m512d mantissa=_mm512_getmant_pd(x,_MM_MANT_NORM_1_2,_MM_MANT_SIGN_src);
+    __m512d exponent=_mm512_getexp_pd(x);
+    const __mmask8 mask=_mm512_cmp_pd_mask(mantissa,PCG32_AVX512_SET_DOUBLE_LLU(0x3FF6A09E667F3BCDLLU),_CMP_GT_OQ);
+    mantissa=_mm512_mask_mul_pd(mantissa,mask,mantissa,PCG32_AVX512_SET_DOUBLE_LLU(0x3FE0000000000000LLU));
+    exponent=_mm512_mask_add_pd(exponent,mask,exponent,PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU));
+    const __m512d normalized=_mm512_sub_pd(mantissa,PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU));
+    const __m512d normalizedAdd2=_mm512_add_pd(mantissa,PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU));
+    const __m512d s=_mm512_div_pd(normalized,normalizedAdd2);
+    const __m512d s2=_mm512_mul_pd(s,s);
+    const __m512d s4=_mm512_mul_pd(s2,s2);
+    static const long long unsigned int L[]={
+        0x3FE5555555555593LLU,
+        0x3FD999999997FA04LLU,
+        0x3FD2492494229359LLU,
+        0x3FCC71C51D8E78AFLLU,
+        0x3FC7466496CB03DELLU,
+        0x3FC39A09D078C69FLLU,
+        0x3FC2F112DF3E5244LLU
+    };
+    const __m512d t1=_mm512_mul_pd(s2,_mm512_fmadd_pd(s4,_mm512_fmadd_pd(s4,_mm512_fmadd_pd(s4,PCG32_AVX512_SET_DOUBLE_LLU(L[6]),PCG32_AVX512_SET_DOUBLE_LLU(L[4])),PCG32_AVX512_SET_DOUBLE_LLU(L[2])),PCG32_AVX512_SET_DOUBLE_LLU(L[0])));
+    const __m512d t2=_mm512_mul_pd(s4,_mm512_fmadd_pd(s4,_mm512_fmadd_pd(s4,PCG32_AVX512_SET_DOUBLE_LLU(L[5]),PCG32_AVX512_SET_DOUBLE_LLU(L[3])),PCG32_AVX512_SET_DOUBLE_LLU(L[1])));
+    const __m512d R=_mm512_add_pd(t1,t2);
+    const __m512d hfsq=_mm512_mul_pd(_mm512_mul_pd(normalized,normalized),PCG32_AVX512_SET_DOUBLE_LLU(0x3FE0000000000000LLU));
+    const __m512d expln2High=_mm512_mul_pd(exponent,PCG32_AVX512_SET_DOUBLE_LLU(0x3FE62E42FEE00000LLU));
+    const __m512d expln2Low =_mm512_mul_pd(exponent,PCG32_AVX512_SET_DOUBLE_LLU(0x3DEA39EF35793C76LLU));
+    const __m512d result=_mm512_sub_pd(expln2High,_mm512_sub_pd(_mm512_sub_pd(hfsq,_mm512_fmadd_pd(s,_mm512_add_pd(hfsq,R),expln2Low)),normalized));
+    #else
+    const __m512i ix=_mm512_castpd_si512(x);
+    const __m512d exponent=_mm512_getexp_pd(x);
+    const __m512d mantissa=_mm512_getmant_pd(x,_MM_MANT_NORM_1_2,_MM_MANT_SIGN_src);
+    const __m512d expLn2=_mm512_mul_pd(exponent,PCG32_AVX512_SET_DOUBLE_LLU(0x3FE62E42FEFA39EFLLU));
+    const __m512d mantissaSub1=_mm512_sub_pd(mantissa,PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU));
+    const __m512d mantissaAdd1=_mm512_add_pd(mantissa,PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU));
+    const __m512d order=_mm512_div_pd(mantissaSub1,mantissaAdd1);
+    const __m512d order2=_mm512_mul_pd(order,order);
+    const long long unsigned int _2dive9=0x3FCC71C71C71C71CLLU;
+    const long long unsigned int _2dive7=0x3FD2492492492492LLU;
+    const long long unsigned int _2dive5=0x3FD999999999999ALLU;
+    const long long unsigned int _2dive3=0x3FE5555555555555LLU;
+    const long long unsigned int _2dive1=0x4000000000000000LLU;
+    const __m512d result=_mm512_fmadd_pd(
+        _mm512_fmadd_pd(
+            _mm512_fmadd_pd(
+                _mm512_fmadd_pd(
+                    _mm512_fmadd_pd(
+                        order2,PCG32_AVX512_SET_DOUBLE_LLU(_2dive9),PCG32_AVX512_SET_DOUBLE_LLU(_2dive7)),
+                        order2,PCG32_AVX512_SET_DOUBLE_LLU(_2dive5)),
+                        order2,PCG32_AVX512_SET_DOUBLE_LLU(_2dive3)),
+                        order2,PCG32_AVX512_SET_DOUBLE_LLU(_2dive1)),
+                        order,expLn2);
+    #endif
+    return result;
+}
+
+// 0 <= shift64 <= 7
+static inline __m512d m512dRightShift(__m512d x,const unsigned shift64){
+    static const __mmask8 mask[8]={
+        (0b11111111<<0)&0xFF,
+        (0b11111111<<1)&0xFF,
+        (0b11111111<<2)&0xFF,
+        (0b11111111<<3)&0xFF,
+        (0b11111111<<4)&0xFF,
+        (0b11111111<<5)&0xFF,
+        (0b11111111<<6)&0xFF,
+        (0b11111111<<7)&0xFF
+    };
+    #if 0
+    static const __m512i m512dRightShiftIndexes[8]={
+        _mm512_set_epi64(7,6,5,4,3,2,1,0),
+        _mm512_set_epi64(6,5,4,3,2,1,0,0),
+        _mm512_set_epi64(5,4,3,2,1,0,0,0),
+        _mm512_set_epi64(4,3,2,1,0,0,0,0),
+        _mm512_set_epi64(3,2,1,0,0,0,0,0),
+        _mm512_set_epi64(2,1,0,0,0,0,0,0),
+        _mm512_set_epi64(1,0,0,0,0,0,0,0),
+        _mm512_set_epi64(0,0,0,0,0,0,0,0),
+    };
+    return _mm512_maskz_permutexvar_pd(mask[shift64],m512dRightShiftIndexes[shift64],x);
+    #else
+    switch(shift64){
+    case 0:
+        return x;
+    case 1:
+        return _mm512_maskz_permutexvar_pd(mask[1],_mm512_set_epi64(6,5,4,3,2,1,0,0),x);
+    case 2:
+        return _mm512_maskz_permutexvar_pd(mask[2],_mm512_set_epi64(5,4,3,2,1,0,0,0),x);
+    case 3:
+        return _mm512_maskz_permutexvar_pd(mask[3],_mm512_set_epi64(4,3,2,1,0,0,0,0),x);
+    case 4:
+        return _mm512_maskz_permutexvar_pd(mask[4],_mm512_set_epi64(3,2,1,0,0,0,0,0),x);
+    case 5:
+        return _mm512_maskz_permutexvar_pd(mask[5],_mm512_set_epi64(2,1,0,0,0,0,0,0),x);
+    case 6:
+        return _mm512_maskz_permutexvar_pd(mask[6],_mm512_set_epi64(1,0,0,0,0,0,0,0),x);
+    case 7:
+        return _mm512_maskz_permutexvar_pd(mask[7],_mm512_set_epi64(0,0,0,0,0,0,0,0),x);
+    default:
+        return x;
+    }
+    #endif
+}
+
+static inline void __x16__PCG32Normal(__x16__PCG32Struct* status,__x16__DoubleArray random,const double mu,const double sigma){
+    #if 0
+
+    __m512d u1=PCG32_AVX512_SET_DOUBLE_LLU(0x0000000000000000LLU);
+    __m512d u2=PCG32_AVX512_SET_DOUBLE_LLU(0x0000000000000000LLU);
+    __m512d S;
+    unsigned validSaved=0;
+    PCG32_AVX512_PCG32_INTRINSIC_LOAD_CONSTANT
+    PCG32_AVX512_PCG32_INTRINSIC_CALCULATE
+    PCG32_AVX512_UNIFORM_REAL_INTRINSIC
+    PCG32_AVX512_UNIFORM_REAL_MIN_MAX_INTRINSIC(-1.0,1.0)
+    const __m512d sum=_mm512_fmadd_pd(random1,random1,_mm512_mul_pd(random0,random0));
+    const __mmask8 greaterThan0=_mm512_cmp_pd_mask(sum,PCG32_AVX512_SET_DOUBLE_LLU(0x0000000000000000LLU),_CMP_GT_OQ);
+    const __mmask8 lessThan1   =_mm512_cmp_pd_mask(sum,PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU),_CMP_LE_OQ);
+    const __mmask8 valid=greaterThan0&lessThan1;
+    unsigned validCount=__builtin_popcount(valid);
+    if(validCount<8){
+        validSaved=validCount;
+        u1=_mm512_maskz_compress_pd(valid,random0);
+        u2=_mm512_maskz_compress_pd(valid,random1);
+        ReGenerate:
+        PCG32_AVX512_PCG32_INTRINSIC_CALCULATE                                                              
+        PCG32_AVX512_UNIFORM_REAL_INTRINSIC                                                
+        PCG32_AVX512_UNIFORM_REAL_MIN_MAX_INTRINSIC(-1.0,1.0)
+        const __m512d sum=_mm512_fmadd_pd(random1,random1,_mm512_mul_pd(random0,random0));
+        const __mmask8 greaterThan0=_mm512_cmp_pd_mask(sum,PCG32_AVX512_SET_DOUBLE_LLU(0x0000000000000000LLU),_CMP_GT_OQ);
+        const __mmask8 lessThan1   =_mm512_cmp_pd_mask(sum,PCG32_AVX512_SET_DOUBLE_LLU(0x3FF0000000000000LLU),_CMP_LE_OQ);
+        const __mmask8 valid=greaterThan0&lessThan1;
+        validCount=__builtin_popcount(valid);
+        const __m512d compressed0=m512dRightShift(_mm512_maskz_compress_pd(valid,random0),validSaved);
+        const __m512d compressed1=m512dRightShift(_mm512_maskz_compress_pd(valid,random1),validSaved);
+        u1=_mm512_or_pd(u1,compressed0);
+        u2=_mm512_or_pd(u2,compressed1);
+        validSaved=validSaved+validCount;
+        if(validSaved<8){
+            goto ReGenerate;
+        }
+        S=_mm512_fmadd_pd(u1,u1,_mm512_mul_pd(u2,u2));
+    }else{
+        u1=random0;
+        u2=random1;
+        S=sum;
+    }
+    const __m512d lnS=__x8__PCG32Ln(S);
+    const __m512d toMultiple=_mm512_sqrt_pd(_mm512_div_pd(_mm512_mul_pd(lnS,PCG32_AVX512_SET_DOUBLE_LLU(0xC000000000000000LLU)),S));
+    __m512d result0=_mm512_mul_pd(toMultiple,u1);
+    __m512d result1=_mm512_mul_pd(toMultiple,u2);
+    
+    #else
+
+    PCG32_AVX512_PCG32_INTRINSIC_LOAD_CONSTANT
+    __m512d negitive1=PCG32_AVX512_SET_DOUBLE_LLU(0xBFF0000000000000LLU);
+    __m512d u1,u2;
+    {
+        PCG32_AVX512_PCG32_INTRINSIC_CALCULATE
+        PCG32_AVX512_UNIFORM_REAL_INTRINSIC
+        u1=_mm512_add_pd(random0,PCG32_AVX512_SET_DOUBLE_LLU(0x3DF0000000000000LLU));
+        const long long unsigned int PiLLU      =0x400921FB54442D18LLU;
+        const long long unsigned int _PiDive2LLU=0xBFF921FB54442D18LLU;
+        random1=_mm512_mul_pd(random1,PCG32_AVX512_SET_DOUBLE_LLU(PiLLU));
+        random1=_mm512_add_pd(random1,PCG32_AVX512_SET_DOUBLE_LLU(_PiDive2LLU));
+        u2=random1;
+    }
+    __m512d Cos=__x8__PCG32Cos(u2);
+    __m512d Sin=__x8__PCG32Sin(u2);
+    {
+        PCG32_AVX512_PCG32_INTRINSIC_CALCULATE
+        __mmask8 mask=_mm512_test_epi64_mask(x,_mm512_set1_epi64(1));
+        Cos=_mm512_mask_mul_pd(Cos,mask,Cos,negitive1);
+        Sin=_mm512_mask_mul_pd(Sin,mask,Sin,negitive1);
+    }
+    __m512d toMultiple=_mm512_sqrt_pd(_mm512_mul_pd(__x8__PCG32Ln(u1),PCG32_AVX512_SET_DOUBLE_LLU(0xC000000000000000LLU)));
+    __m512d result0=_mm512_mul_pd(toMultiple,Cos);
+    __m512d result1=_mm512_mul_pd(toMultiple,Sin);
+
+    #endif
+    if(mu!=0.0||sigma!=1.0){
+        union DoubleLLU{                                                                      
+            double d;
+            long long unsigned int u;
+        }muUnion,sigmaUnion;
+        muUnion.d   =mu;
+        sigmaUnion.d=sigma;
+        result0=_mm512_fmadd_pd(result0,PCG32_AVX512_SET_DOUBLE_LLU(sigmaUnion.u),PCG32_AVX512_SET_DOUBLE_LLU(muUnion.u));
+        result1=_mm512_fmadd_pd(result1,PCG32_AVX512_SET_DOUBLE_LLU(sigmaUnion.u),PCG32_AVX512_SET_DOUBLE_LLU(muUnion.u));
+    }
+    _mm512_store_pd(random+0,result0);
+    _mm512_store_pd(random+8,result1);
+}
+
+static inline void __x16__PCG32StandardNormal(__x16__PCG32Struct* status,__x16__DoubleArray random){
+    __x16__PCG32Normal(status,random,0.0,1.0);
 }
 
 #endif
@@ -1427,20 +1921,6 @@ PCG32_HOST_DEVICE inline double PCG32PRNG::Poisson(){
     return PCG32Poisson(&status);
 }
 
-// #include <algorithm>
-
-// PCG32_HOST_DEVICE static inline void PCG32UniformSum(PCG32Struct* status,const unsigned n,const unsigned sum,unsigned* variables){
-//     for(unsigned index=1;index<n;index=index+1){
-//         variables[index]=PCG32Uniform_MaxBiggerThanMin(status,0,sum);
-//     }
-//     std::sort(variables+1,variables+n);
-//     variables[0]=variables[1];
-//     for(unsigned index=1;index<n-1;index=index+1){
-//         variables[index]=variables[index+1]-variables[index];
-//     }
-//     variables[n-1]=sum-variables[n-1];
-// }
-
 #else
 
 #define GENERATE_FOR_TYPE(TypeName,Type)                                                                         \
@@ -1501,5 +1981,158 @@ GENERATE_FOR_TYPE(unsigned,unsigned)
     }while(0)
 
 #endif
+
+PCG32_HOST_DEVICE static inline unsigned rotr32(unsigned x,unsigned r){
+    return x>>r|x<<(-r&31);
+}
+
+PCG32_HOST_DEVICE static inline long long unsigned int PCG32NextPrime(long long unsigned int prime){
+    if(prime<=1){
+        return 2;
+    }
+    if(prime==2){
+        return 3;
+    }
+    if((prime&1)==0){
+        prime=prime-1;
+    }
+    for(long long unsigned int number=prime+2;true;number=number+2){
+        const long long unsigned int sqrtPrime=(long long unsigned int)(sqrt(number)+0.5);
+        bool isPrime=true;
+        for(long long unsigned int mod=3;mod<=sqrtPrime;mod=mod+2){
+            if(number%mod==0){
+                isPrime=false;
+                break;
+            }
+        }
+        if(isPrime){
+            return number;
+        }
+    }
+}
+
+// This function requires that the inputs a and b be coprime.
+PCG32_HOST_DEVICE static inline unsigned PCG32ModInverse(unsigned a,unsigned b){
+    const long long m=b;
+    long long x=1;
+    long long lasxX=0;
+    while(b){
+        const long long quotient=a/b;
+        long long temporary=a%b;
+        a=b;
+        b=temporary;
+        temporary=x-quotient*lasxX;
+        x=lasxX;
+        lasxX=temporary;
+    }
+    if(a==1){
+        return (x%m+m)%m;
+    }
+    return -1;
+}
+
+PCG32_HOST static inline long long unsigned int PCG32TimeNanoeconds(){
+    struct timespec ts;
+    timespec_get(&ts,TIME_UTC);
+    return (long long unsigned int)ts.tv_sec*1000000000LLU+ts.tv_nsec;
+}
+
+// 0 < x
+PCG32_HOST_DEVICE static inline double PCG32Ln(const double x){
+    union{
+        double d;
+        long long unsigned int u;
+    }u={x};
+    const int exp2=((int)(u.u>>52)&0b011111111111)-1023;
+    const double ln2=0.69314718055994530941723212145817656807550013436025525412068L;
+    const double exp2ln2=exp2*ln2;
+    u.u=u.u|(1023LLU<<52);
+    const unsigned scale=(unsigned)((u.d-1)*20);
+    static const double dive[20]={
+                                                                   1.0L,
+        0.952380952380952380952380952380952380952380952380952380952381L,
+        0.909090909090909090909090909090909090909090909090909090909091L,
+        0.869565217391304347826086956521739130434782608695652173913043L,
+        0.833333333333333333333333333333333333333333333333333333333333L,
+                                                                   0.8L,
+        0.769230769230769230769230769230769230769230769230769230769231L,
+        0.740740740740740740740740740740740740740740740740740740740741L,
+        0.714285714285714285714285714285714285714285714285714285714286L,
+        0.689655172413793103448275862068965517241379310344827586206897L,
+        0.666666666666666666666666666666666666666666666666666666666667L,
+        0.645161290322580645161290322580645161290322580645161290322581L,
+                                                                 0.625L,
+        0.606060606060606060606060606060606060606060606060606060606061L,
+        0.588235294117647058823529411764705882352941176470588235294118L,
+        0.571428571428571428571428571428571428571428571428571428571429L,
+        0.555555555555555555555555555555555555555555555555555555555556L,
+        0.540540540540540540540540540540540540540540540540540540540541L,
+        0.526315789473684210526315789473684210526315789473684210526316L,
+        0.512820512820512820512820512820512820512820512820512820512821L
+    };
+    static const double add[20]={
+        0                                                               ,
+        0.0487901641694320030653744042231646586079736644155824100400766L,
+        0.0953101798043248600439521232807650922206053653086441991852398L,
+         0.139761942375158697371529255667655342765778691851407511844627L,
+         0.182321556793954626211718025154514633197389337914486983942726L,
+         0.223143551314209755766295090309834503374601085548007213671288L,
+         0.262364264467491052035495986880954397204166456131434140385718L,
+         0.300104592450338080750512134625036338265870050479220125050075L,
+         0.336472236621212930504593410216992090111483375313343466546742L,
+         0.371563556432483033748048456219370829817911290933715848767662L,
+         0.405465108108164381978013115464349136571990423462494197614014L,
+          0.43825493093115525249394074839981643477333730749156374160271L,
+         0.470003629245735553650937031148342064700899048812248040449392L,
+         0.500775287912489242021965238745114228792595788771138396799254L,
+          0.53062825106217039623154316318876232798710152395697181126391L,
+          0.55961578793542268627088850052682659348608446086135068021803L,
+         0.587786664902119008189731140618863769769379761376981181556741L,
+         0.615185639090233450932872094888906388223475964178607933490905L,
+         0.641853886172394775991035977203489329636277772670355842504632L,
+         0.667829372575655434013509102345303533776156879593928337999732L
+    };
+    u.d=u.d*dive[scale];
+    const double toAdd=exp2ln2+add[scale];
+    const double order=(u.d-1.0)/(u.d+1.0);
+    const double order2=order*order;
+    return ((((2.0/9.0*order2+2.0/7.0)*order2+2.0/5.0)*order2+2.0/3.0)*order2+2.0)*order+toAdd;
+}
+
+PCG32_HOST_DEVICE static inline double PCG32PowerUnsigned(double x,unsigned n){
+    double power=1.0;
+    do{
+        if(n&1){
+            power=power*x;
+        }
+        n=n>>1;
+        x=x*x;
+    }while(n);
+    return power;
+}
+
+PCG32_HOST_DEVICE static inline double PCG32LnStirlingLeft(const double x){
+    static const double C[5]={1.0/12,-1.0/360,1.0/1260,-1.0/1680,1.0/1188};
+    double xPower[5]; // x^1, x^3, x^5, x^7, x^9
+    xPower[0]=1.0/x;
+    const double x2=xPower[0]*xPower[0];
+    xPower[1]=xPower[0]*x2;
+    xPower[2]=xPower[1]*x2;
+    xPower[3]=xPower[2]*x2;
+    xPower[4]=xPower[3]*x2;
+    return C[0]*xPower[0]+C[1]*xPower[1]+C[2]*xPower[2]+C[3]*xPower[3]+C[4]*xPower[4];
+}
+
+// only accept x > 0
+PCG32_HOST_DEVICE static inline double PCG32LnStirling(double x){
+    double sub=0.0;
+    while(x<12){
+        sub=sub+log(x);
+        x=x+1;
+    }
+    const double ln2Pidive2=0.91893853320467274178032973640561763986139747363778341L;
+    const double lnx=log(x);
+    return ln2Pidive2+lnx*0.5+x*(lnx-1.0)+PCG32LnStirlingLeft(x)-sub;
+}
 
 #endif
