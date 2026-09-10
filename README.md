@@ -54,7 +54,7 @@ A lightweight, high-performance pseudorandom number generator based on the PCG-X
 #include "PCG32.h"
 
 // Basic initialization
-PCG32PRNG rng(time(nullptr));
+PCG32PRNG rng(PCG32TimeNanoeconds(nullptr));
 
 // Uniform real in [-1.0, 1.0)
 double u = rng.UniformReal(-1.0, 1.0);
@@ -86,7 +86,7 @@ rng.UniformShuffle(myArray, 100);
 #include "PCG32.h"
 
 PCG32Struct state;
-PCG32SetSeed(&state, time(NULL));
+PCG32SetSingleSeed(&state, PCG32TimeNanoeconds(NULL));
 
 // Uniform real
 double u = PCG32UniformReal(&state, -1.0, 1.0);
@@ -114,11 +114,179 @@ PCG32UniformShuffle(&state, myArray, 100);
 
 ## 📚 API Reference
 
+### Auxiliary Functions
+
+| Function | Description |
+|----------|-------------|
+| `PCG32TimeNanoeconds` | Get current time in nanoseconds since epoch (1970-01-01 00:00:00 UTC) |
+
+**Example:**
+```c
+long long unsigned int time = PCG32TimeNanoeconds();
+PCG32Struct state;
+PCG32SetSingleSeed(&state, time);
+```
+
+---
+
+### Seed Initialization
+
+| Function | Description |
+|----------|-------------|
+| `PCG32SetSingleSeed` | Initialize a single generator with a seed |
+| `PCG32SetMultipleSeeds` | Initialize multiple generators with a seed array |
+| `__x16__PCG32SetMultipleSeeds` | Initialize multiple AVX152 generators with a __x16__SeedArray array |
+
+> ⚠️ **Note:** `PCG32SetSeed` is deprecated. Use `PCG32SetSingleSeed` for a single generator, or `PCG32SetMultipleSeeds` for multiple generators.
+
+**Single Generator Example:**
+```cpp
+PCG32PRNG rng(PCG32TimeNanoeconds());
+```
+
+```c
+PCG32Struct state;
+PCG32SetSingleSeed(&state, PCG32TimeNanoeconds());
+```
+
+**Multi-threaded Seed Initialization Example:**
+```cpp
+#include "PCG32.h"
+#include <omp.h>
+
+#define THREAD_NUMBER 32
+
+// or use malloc or std::vector if THREAD_NUMBER is not a compile-time constant
+long long unsigned int seeds[THREAD_NUMBER]; 
+PCG32Struct status[THREAD_NUMBER];
+long long unsigned int time = PCG32TimeNanoeconds();
+
+// Generate distinct seeds for each thread
+for (unsigned threadIndex = 0; threadIndex < THREAD_NUMBER; threadIndex++) {
+    seeds[threadIndex] = time + threadIndex * 0x123456789ABCDEFLLU + 1123;
+}
+
+// Initialize all generators with one call
+PCG32SetMultipleSeeds(status, seeds, THREAD_NUMBER);
+
+#pragma omp parallel num_threads(THREAD_NUMBER)
+{
+    int tid = omp_get_thread_num();
+    // Each thread uses its own generator
+    double u = PCG32UniformReal(&status[tid], 0.0, 1.0);
+    // ... generate more numbers ...
+}
+```
+
+**AVX512 Multi-threaded Seed Initialization Example:**
+
+```c
+#include "PCG32.h"
+#include <omp.h>
+
+#define THREAD_NUMBER 32
+
+// or use malloc or std::vector if THREAD_NUMBER is not a compile-time constant
+__x16__SeedArray AVX512Seeds[THREAD_NUMBER];
+__x16__PCG32Struct AVX512Status[THREAD_NUMBER];
+long long unsigned int time = PCG32TimeNanoeconds();
+
+// Generate distinct seeds for each thread
+for (unsigned threadIndex = 0; threadIndex < THREAD_NUMBER; threadIndex++) {
+   for (unsigned index = 0; index < 16; index++) {
+       AVX512Seeds[threadIndex][index] = time + threadIndex * 0x123456789ABCDEFLLU + index;
+   }
+}
+
+// Initialize all generators for scalar and AVX512 usage
+__x16__PCG32SetMultipleSeeds(AVX512Status, AVX512Seeds, THREAD_NUMBER);
+
+#pragma omp parallel num_threads(THREAD_NUMBER)
+{
+   int tid = omp_get_thread_num();
+   
+   // AVX512 generator for this thread (generates 16 values at once)
+   __x16__DoubleArray avxUniforms;
+   __x16__PCG32UniformReal(&AVX512Status[tid], avxUniforms);
+   // Process 16 random values...
+}
+```
+
+**CUDA Seed Initialization Example:**
+```cpp
+#include "PCG32.h"
+
+// CUDA kernel - each thread processes its own generator
+__global__ void kernel(PCG32Struct* deviceStatus, unsigned* results, int N) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= N) return;
+    
+    // Each thread copies its status from device memory to local stack
+    // (register/local memory is much faster than global memory)
+    PCG32Struct localStatus = deviceStatus[idx];
+    
+    // Generate random numbers using local state
+    for (int i = 0; i < 10; i++) {
+        unsigned random = PCG32(&localStatus);
+        results[idx * 10 + i] = random;
+    }
+    
+    // Write back updated state if needed for subsequent kernel launches
+    deviceStatus[idx] = localStatus;
+}
+
+int main() {
+    const int N = 1024 * 1024;  // 1 million threads
+    const int BLOCK_SIZE = 256;
+    const int GRID_SIZE = (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    
+    // Host-side arrays
+    long long unsigned int* seeds = (long long unsigned int*)malloc(N * sizeof(long long unsigned int));
+    PCG32Struct* hostStatus = (PCG32Struct*)malloc(N * sizeof(PCG32Struct));
+    unsigned* hostResults = (unsigned*)malloc(N * 10 * sizeof(unsigned));
+    
+    // Device-side arrays
+    PCG32Struct* deviceStatus;
+    unsigned* deviceResults;
+    cudaMalloc(&deviceStatus, N * sizeof(PCG32Struct));
+    cudaMalloc(&deviceResults, N * 10 * sizeof(unsigned));
+    
+    // Generate seeds on host
+    long long unsigned int time = PCG32TimeNanoeconds();
+    for (int i = 0; i < N; i++) {
+        seeds[i] = time + i * 0x123456789ABCDEFLLU + 1123;
+    }
+    
+    // Initialize all generators on host using PCG32SetMultipleSeeds
+    PCG32SetMultipleSeeds(hostStatus, seeds, N);
+    
+    // Copy initialized generators to device
+    cudaMemcpy(deviceStatus, hostStatus, N * sizeof(PCG32Struct), cudaMemcpyHostToDevice);
+    
+    // Launch kernel with proper grid configuration
+    kernel<<<GRID_SIZE, BLOCK_SIZE>>>(deviceStatus, deviceResults, N);
+    cudaDeviceSynchronize();
+    
+    // Copy results back
+    cudaMemcpy(hostResults, deviceResults, N * 10 * sizeof(unsigned), cudaMemcpyDeviceToHost);
+    
+    // Clean up
+    free(seeds);
+    free(hostStatus);
+    free(hostResults);
+    cudaFree(deviceStatus);
+    cudaFree(deviceResults);
+    
+    return 0;
+}
+```
+
+---
+
 ### Core Functions
 
 | Function | Description |
 |----------|-------------|
-| `PCG32SetSeed` | Initialize generator with seed |
 | `PCG32` | Generate 32-bit uniform integer `[0, 0xFFFFFFFF]` |
 
 ---
@@ -179,6 +347,9 @@ double u = PCG32UniformReal(&state, 0.0, 1.0);
 | Function | Description |
 |----------|-------------|
 | `PCG32StandardNormal` | Standard normal `N(0,1)` |
+| `PCG32StandardNormal2D` | Generate 2 standard normal samples at once |
+| `PCG32StandardNormal3D` | Generate 3 standard normal samples at once |
+| `PCG32StandardNormalNDimension` | Generate N standard normal samples |
 
 **Example:**
 ```cpp
@@ -454,10 +625,10 @@ PCG32UniformShuffle_FirstK(&state, array, 100, 20);
 
 When compiled with GCC/G++ on x86_64 with AVX512F and AVX512DQ, the library provides SIMD functions that generate **16 random numbers simultaneously**.
 
-### Build Flags
+### Build Example
 
 ```bash
-g++ -O3 -mavx512f -mavx512dq -std=c++11 -o myapp main.cpp
+g++ -O3 -mavx512f -mavx512dq -mfma -std=c++11 -o myapp main.cpp
 ```
 
 ### Data Types (64-byte aligned)
@@ -473,50 +644,108 @@ g++ -O3 -mavx512f -mavx512dq -std=c++11 -o myapp main.cpp
 
 | Function | Description |
 |----------|-------------|
-| `__x16__PCG32SetSeed` | Initialize 16 generators |
+| `__x16__PCG32SetSingleSeed` | Initialize 16 generators with a seed array |
+| `__x16__PCG32SetMultipleSeeds` | Initialize multiple 16-lane generator sets |
 | `__x16__PCG32` | Generate 16 random 32-bit integers |
 | `__x16__PCG32UniformReal` | Generate 16 uniform reals in `[0,1)` |
 | `__x16__PCG32UniformReal_MinMax` | Generate 16 uniform reals in `[min, max)` |
 | `__x16__PCG32UniformSetStrictRange` | Preset a strict range for all 16 lanes |
 | `__x16__PCG32Uniform_StrictRangeUnchanged` | Generate 16 integers from preset range |
+| `__x16__PCG32StandardNormal` | Generate 16 standard normal N(0,1) samples |
+| `__x16__PCG32Normal` | Generate 16 normal N(mu, sigma) samples |
 
-### Example
+> ⚠️ **Note:** `__x16__PCG32SetSeed` is no longer support. Use `__x16__PCG32SetSingleSeed` for a single 16-lane set, or `__x16__PCG32SetMultipleSeeds` for multiple sets.
+
+---
+
+### AVX512 Example
 
 ```cpp
 #include "PCG32.h"
 
-// 1. Initialize 16 generators with seeds
-// Set different seeds in different thread!
+// 1. __x16__PCG32SetSingleSeed - Initialize 16 generators with seeds
 __x16__PCG32Struct avxState;
-__x16__SeedArray seeds;
-for (int i = 0; i < 16; i++) {
-    seeds[i] = 0xADABF3924A46334BLLU + i * 0x9E3779B97F4A7C15LLU;
-}
-__x16__PCG32SetSeed(&avxState, seeds);
+__x16__SeedArray seeds = {
+    0x123456789ABCDEF0ULL, 0x23456789ABCDEF01ULL,  // ... 16 seeds total
+    // ... fill all 16 seeds
+};
+__x16__PCG32SetSingleSeed(&avxState, seeds);
 
-// 2. Generate 16 random integers
+// 2. __x16__PCG32 - Generate 16 random 32-bit integers
 __x16__UnsignedArray randoms;
 __x16__PCG32(&avxState, randoms);
 // randoms[0] through randoms[15] contain random 32-bit values
 
-// 3. Generate 16 uniform reals in [0, 1)
+// 3. __x16__PCG32UniformReal - Generate 16 uniform reals in [0, 1)
 __x16__DoubleArray uniforms;
 __x16__PCG32UniformReal(&avxState, uniforms);
+// uniforms[0] through uniforms[15] are in [0.0, 1.0)
 
-// 4. Preset strict range for all lanes
+// 4. __x16__PCG32UniformSetStrictRange - Preset strict range for all lanes
+//    Range: [0, 999] for all 16 generators
 __x16__PCG32UniformSetStrictRange(&avxState, 0, 999);
 
-// 5. Generate 16 integers from preset range (repeated use for performance)
+// 5. __x16__PCG32Uniform_StrictRangeUnchanged - Generate 16 integers from preset range
+__x16__UnsignedArray strictRandoms;
 for (int batch = 0; batch < 10; ++batch) {
-    __x16__UnsignedArray strictRandoms;
     __x16__PCG32Uniform_StrictRangeUnchanged(&avxState, strictRandoms);
     // strictRandoms[0..15] are all in [0, 999]
+    // Process the 16 random values...
 }
+// Note: For optimal performance with AVX512 strict range, the range should be
+// preset once with __x16__PCG32UniformSetStrictRange, then reuse it with
+// __x16__PCG32Uniform_StrictRangeUnchanged for many batches.
 
 // 6. Generate 16 uniform reals in custom range [min, max)
 __x16__DoubleArray customUniforms;
 __x16__PCG32UniformReal_MinMax(&avxState, -5.0, 5.0, customUniforms);
 // customUniforms[0..15] are all in [-5.0, 5.0)
+
+// 7. Generate 16 standard normal N(0,1) samples
+__x16__DoubleArray normalSamples;
+__x16__PCG32StandardNormal(&avxState, normalSamples);
+// normalSamples[0..15] are standard normal distributed
+
+// 8. Generate 16 normal N(mu, sigma) samples
+__x16__DoubleArray customNormalSamples;
+__x16__PCG32Normal(&avxState, customNormalSamples, 2.0, 0.5);
+// customNormalSamples[0..15] are N(2.0, 0.5) distributed
+```
+
+---
+
+### AVX512 Multi-threaded Seed Initialization
+
+```cpp
+#include "PCG32.h"
+#include <omp.h>
+
+#define THREAD_NUMBER 32
+
+// or use malloc or std::vector if THREAD_NUMBER is not a compile-time constant
+__x16__SeedArray AVX512Seeds[THREAD_NUMBER];
+__x16__PCG32Struct AVX512Status[THREAD_NUMBER];
+long long unsigned int time = PCG32TimeNanoeconds();
+
+// Generate distinct seeds for each thread
+for (unsigned threadIndex = 0; threadIndex < THREAD_NUMBER; threadIndex++) {
+    for (unsigned index = 0; index < 16; index++) {
+        AVX512Seeds[threadIndex][index] = time + threadIndex * 0x123456789ABCDEFLLU + index;
+    }
+}
+
+// Initialize all generators for scalar and AVX512 usage
+__x16__PCG32SetMultipleSeeds(AVX512Status, AVX512Seeds, THREAD_NUMBER);
+
+#pragma omp parallel num_threads(THREAD_NUMBER)
+{
+    int tid = omp_get_thread_num();
+    
+    // AVX512 generator for this thread (generates 16 values at once)
+    __x16__DoubleArray avxUniforms;
+    __x16__PCG32UniformReal(&AVX512Status[tid], avxUniforms);
+    // Process 16 random values...
+}
 ```
 
 > ⚠️ **Note:** AVX512 functions are not available in CUDA mode.
@@ -532,25 +761,68 @@ All functions are decorated with `PCG32_HOST_DEVICE`, enabling direct usage with
 ```cpp
 #include "PCG32.h"
 
-__global__ void kernel(PCG32Struct* states, int N, double* results) {
+// CUDA kernel - each thread processes its own generator
+__global__ void kernel(PCG32Struct* deviceStatus, unsigned* results, int N) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;
     
-    PCG32Struct* state = &states[idx];
-    double u = PCG32UniformReal(state, 0.0, 1.0);
-    results[idx] = u;
+    // Each thread copies its status from device memory to local stack
+    // (register/local memory is much faster than global memory)
+    PCG32Struct localStatus = deviceStatus[idx];
+    
+    // Generate random numbers using local state
+    for (int i = 0; i < 10; i++) {
+        unsigned random = PCG32(&localStatus);
+        results[idx * 10 + i] = random;
+    }
+    
+    // Write back updated state if needed for subsequent kernel launches
+    deviceStatus[idx] = localStatus;
 }
 
 int main() {
-    const int N = 1000;
-    PCG32Struct* d_states;
-    cudaMalloc(&d_states, N * sizeof(PCG32Struct));
+    const int N = 1024 * 1024;  // 1 million threads
+    const int BLOCK_SIZE = 256;
+    const int GRID_SIZE = (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
     
-    // Initialize each state with a unique seed
-    // ... (initialize on device)
+    // Host-side arrays
+    long long unsigned int* seeds = (long long unsigned int*)malloc(N * sizeof(long long unsigned int));
+    PCG32Struct* hostStatus = (PCG32Struct*)malloc(N * sizeof(PCG32Struct));
+    unsigned* hostResults = (unsigned*)malloc(N * 10 * sizeof(unsigned));
     
-    kernel<<<N/256, 256>>>(d_states, N, d_results);
-    // ...
+    // Device-side arrays
+    PCG32Struct* deviceStatus;
+    unsigned* deviceResults;
+    cudaMalloc(&deviceStatus, N * sizeof(PCG32Struct));
+    cudaMalloc(&deviceResults, N * 10 * sizeof(unsigned));
+    
+    // Generate seeds on host
+    long long unsigned int time = PCG32TimeNanoeconds();
+    for (int i = 0; i < N; i++) {
+        seeds[i] = time + i * 0x123456789ABCDEFLLU + 1123;
+    }
+    
+    // Initialize all generators on host using PCG32SetMultipleSeeds
+    PCG32SetMultipleSeeds(hostStatus, seeds, N);
+    
+    // Copy initialized generators to device
+    cudaMemcpy(deviceStatus, hostStatus, N * sizeof(PCG32Struct), cudaMemcpyHostToDevice);
+    
+    // Launch kernel with proper grid configuration
+    kernel<<<GRID_SIZE, BLOCK_SIZE>>>(deviceStatus, deviceResults, N);
+    cudaDeviceSynchronize();
+    
+    // Copy results back
+    cudaMemcpy(hostResults, deviceResults, N * 10 * sizeof(unsigned), cudaMemcpyDeviceToHost);
+    
+    // Clean up
+    free(seeds);
+    free(hostStatus);
+    free(hostResults);
+    cudaFree(deviceStatus);
+    cudaFree(deviceResults);
+    
+    return 0;
 }
 ```
 
@@ -578,7 +850,7 @@ nvcc -O3 -std=c++11 -arch=sm_70 -o myapp main.cu
 
 ```bash
 # GCC/G++ only
-g++ -O3 -mavx512f -mavx512dq -std=c++11 -o myapp main.cpp
+g++ -O3 -mavx512f -mavx512dq -mfma -std=c++11 -o myapp main.cpp
 ```
 
 ---
@@ -605,12 +877,12 @@ g++ -O3 -mavx512f -mavx512dq -std=c++11 -o myapp main.cpp
 
 ## ⚠️ Important Notes
 
-1. **Always set a seed** before generating numbers.
-2. **Multi-threading**: Use separate generator instances per thread with distinct seeds.
+1. **Always set a seed** before generating numbers. Use `PCG32SetSingleSeed` for a single generator, or `PCG32SetMultipleSeeds` for multiple generators. `PCG32SetSeed` is deprecated.
+2. **Multi-threading**: Use different `PCG32Struct` per thread with different seeds.
 3. **Gamma restriction**: Currently only supports shape parameter `α >= 1`.
 4. **Performance tip**: For repeated generation within the same integer range, use `UniformSetStrictRange` + `Uniform_StrictRangeUnchanged` for optimal speed.
-5. **AVX512 restriction**: Only available with GCC/G++ on x86_64 with `-mavx512f -mavx512dq` flags. Not available in CUDA mode.
-6. **CUDA**: All functions are `__host__ __device__` compatible.
+5. **AVX512 restriction**: Only available with GCC/G++ on x86_64 with `-mavx512f -mavx512dq -mfma` flags. Not available in CUDA mode.
+6. **CUDA**: Set seeds at host side using PCG32SetMultipleSeeds. All functions are `__host__ __device__` compatible.
 
 ---
 
