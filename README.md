@@ -4,7 +4,7 @@ A lightweight, high-performance pseudorandom number generator based on the PCG-X
 
 # Performance
 
-<img width="2144" height="2954" alt="pcg32_vs_std_speed_comparison_log" src="https://github.com/user-attachments/assets/18286bda-0793-419a-91b1-b8a16ce5465c" />
+<img width="2136" height="2718" alt="pcg32_vs_std_speed_comparison_log" src="https://github.com/user-attachments/assets/87beb701-a5b5-41da-906c-8e331e40516e" />
 
 ---
 
