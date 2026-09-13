@@ -201,7 +201,7 @@
 //   }
 //
 // CUDA Seed Initialization with PCG32SetMultipleSeeds:
-
+//
 //   #include "PCG32.h"
 //   
 //   // CUDA kernel - each thread processes its own generator
@@ -386,6 +386,8 @@
     #include <limits>
     #include <float.h>
     #include <time.h>
+    #include <stdlib.h>
+    #include <string.h>
 #else
     #define PCG32_HOST_DEVICE
     #define PCG32_DEVICE
@@ -395,6 +397,8 @@
     #include <float.h>
     #include <stdio.h>
     #include <time.h>
+    #include <stdlib.h>
+    #include <string.h>
 #endif
 
 #if PCG32_CUDA
@@ -423,6 +427,10 @@
 
 #define PCG32_INT_MAX      0x7FFFFFFFU
 #define PCG32_UNSIGNED_MAX 0xFFFFFFFFU
+
+#ifdef __cplusplus
+extern "C"{
+#endif
 
 typedef struct PCG32Struct{
     long long unsigned int state;
@@ -454,10 +462,10 @@ typedef struct PCG32Struct{
     }Poisson;
 }PCG32Struct;
 
-
 // Auxiliary C Functions
 PCG32_HOST_DEVICE static inline unsigned rotr32(unsigned x,unsigned r);
 PCG32_HOST_DEVICE static inline long long unsigned int PCG32NextPrime(long long unsigned int prime);
+PCG32_HOST_DEVICE static inline long long unsigned int PCG32Advance(const long long unsigned int state0,long long unsigned int step);
 // This function requires that the inputs a and b be coprime.
 PCG32_HOST_DEVICE static inline unsigned PCG32ModInverse(unsigned a,unsigned b);
 // get nanoeconds from 1970.1.1 00:00:00 UTC
@@ -519,7 +527,6 @@ PCG32_HOST_DEVICE static inline unsigned PCG32MultinomialSampling(PCG32Struct* s
 // sum of probabilities must be 1
 PCG32_HOST_DEVICE static inline void     PCG32MultinomialSamplingCount(PCG32Struct* status,const double* probabilities,const unsigned length,const unsigned count,unsigned* result);
 
-
 // AVX512 C Functions 
 #if PCG32_AVX512
 
@@ -551,8 +558,8 @@ static inline __m512d m512dRightShift(__m512d x,const unsigned shift64);
 
 // Random Number Generator C Funtions (Prefix: __x16__PCG32)
 static inline void __x16__PCG32(__x16__PCG32Struct* status,__x16__UnsignedArray random);
-static inline void __x16__PCG32SetSingleSeed(__x16__PCG32Struct* status,__x16__SeedArray seed);
-static inline void __x16__PCG32SetMultipleSeeds(__x16__PCG32Struct* status,__x16__SeedArray baseSeed[],const unsigned count);
+static inline void __x16__PCG32SetSingleSeed(__x16__PCG32Struct* status,const __x16__SeedArray seed);
+static inline void __x16__PCG32SetMultipleSeeds(__x16__PCG32Struct* status,const __x16__SeedArray baseSeed[],const unsigned count);
 static inline void __x16__PCG32UniformReal(__x16__PCG32Struct* status,__x16__DoubleArray random);
 static inline void __x16__PCG32UniformReal_MinMax(__x16__PCG32Struct* status,const double min,const double max,__x16__DoubleArray random);
 static inline void __x16__PCG32UniformSetStrictRange(__x16__PCG32Struct* status,const unsigned min,const unsigned max);
@@ -560,6 +567,10 @@ static inline void __x16__PCG32Uniform_StrictRangeUnchanged(__x16__PCG32Struct* 
 static inline void __x16__PCG32Normal(__x16__PCG32Struct* status,__x16__DoubleArray random,const double mu,const double sigma);
 static inline void __x16__PCG32StandardNormal(__x16__PCG32Struct* status,__x16__DoubleArray random);
 
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #if defined(__cplusplus)||PCG32_CUDA
@@ -637,14 +648,30 @@ PCG32_HOST_DEVICE static inline void PCG32SetSingleSeed(PCG32Struct* status,cons
     PCG32(status);
 }
 
+PCG32_HOST_DEVICE static inline long long unsigned int PCG32Advance(const long long unsigned int state0,long long unsigned int step){
+    long long unsigned int accumulateMultiple =1;
+    long long unsigned int accumulateIncrement=0;
+    long long unsigned int multiple =PCG32MULTIPLIER;
+    long long unsigned int increment=PCG32INCREMENT;
+    while(step){
+        if(step&1){
+            accumulateMultiple =accumulateMultiple*multiple;
+            accumulateIncrement=accumulateIncrement*multiple+increment;
+        }
+        increment=increment*(multiple+1);
+        multiple=multiple*multiple;
+        step=step>>1;
+    }
+    return state0*accumulateMultiple+accumulateIncrement;
+}
+
 PCG32_HOST static inline void PCG32SetMultipleSeeds(PCG32Struct* statusArray,const long long unsigned int* baseSeeds,const unsigned count){
     unsigned prime=0;
     for(unsigned index=0;index<count;index=index+1){
         PCG32SetSingleSeed(statusArray+index,baseSeeds[index]);
         prime=PCG32NextPrime(prime);
-        for(unsigned step=0;step<prime;step=step+1){
-            PCG32(statusArray+index);
-        }
+        long long unsigned int newState=PCG32Advance(statusArray[index].state,prime);
+        PCG32SetSingleSeed(statusArray+index,statusArray[index].state);
     }
 }
 
@@ -1332,9 +1359,18 @@ static inline void __x16__PCG32(__x16__PCG32Struct* status,__x16__UnsignedArray 
     _mm512_store_epi64(random,x);
 }
 
-static inline void __x16__PCG32SetSingleSeed(__x16__PCG32Struct* status,__x16__SeedArray seed){
-    const __m512i seed0=_mm512_set_epi64(seed[ 7],seed[ 6],seed[ 5],seed[ 4],seed[ 3],seed[ 2],seed[ 1],seed[ 0]);
-    const __m512i seed1=_mm512_set_epi64(seed[15],seed[14],seed[13],seed[12],seed[11],seed[10],seed[ 9],seed[ 8]);
+static inline void __x16__PCG32SetSingleSeed(__x16__PCG32Struct* status,const __x16__SeedArray seed){
+    __x16__SeedArray seedCopy;
+    memcpy(seedCopy,seed,sizeof(__x16__SeedArray));
+    PCG32Struct scalarStatus[16];
+    unsigned prime=0;
+    for(unsigned index=0;index<sizeof(__x16__SeedArray)/sizeof(seed[0]);index=index+1){
+        PCG32SetSingleSeed(scalarStatus+index,seedCopy[index]);
+        prime=PCG32NextPrime(prime);
+        seedCopy[index]=PCG32Advance(scalarStatus[index].state,prime);
+    }
+    const __m512i seed0=_mm512_set_epi64(seedCopy[ 7],seedCopy[ 6],seedCopy[ 5],seedCopy[ 4],seedCopy[ 3],seedCopy[ 2],seedCopy[ 1],seedCopy[ 0]);
+    const __m512i seed1=_mm512_set_epi64(seedCopy[15],seedCopy[14],seedCopy[13],seedCopy[12],seedCopy[11],seedCopy[10],seedCopy[ 9],seedCopy[ 8]);
     const __m512i add=_mm512_set_epi64(PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT);
     status->state0=_mm512_add_epi64(seed0,add);
     status->state1=_mm512_add_epi64(seed1,add);
@@ -1342,19 +1378,24 @@ static inline void __x16__PCG32SetSingleSeed(__x16__PCG32Struct* status,__x16__S
     __x16__PCG32(status,random);
 }
 
-static inline void __x16__PCG32SetMultipleSeeds(__x16__PCG32Struct* status,__x16__SeedArray baseSeed[],const unsigned count){
+static inline void __x16__PCG32SetMultipleSeeds(__x16__PCG32Struct* status,const __x16__SeedArray baseSeed[],const unsigned count){
     PCG32Struct scalarStatus[16];
+    __x16__SeedArray seedCopy;
     unsigned prime=0;
     for(unsigned indexStatus=0;indexStatus<count;indexStatus=indexStatus+1){
+        memcpy(seedCopy,baseSeed[indexStatus],sizeof(__x16__SeedArray));
         for(unsigned index=0;index<sizeof(__x16__SeedArray)/sizeof(baseSeed[0][0]);index=index+1){
-            PCG32SetSingleSeed(scalarStatus+index,baseSeed[indexStatus][index]);
+            PCG32SetSingleSeed(scalarStatus+index,seedCopy[index]);
             prime=PCG32NextPrime(prime);
-            for(unsigned step=0;step<prime;step=step+1){
-                PCG32(scalarStatus+index);
-            }
-            baseSeed[indexStatus][index]=scalarStatus[index].state;
+            seedCopy[index]=PCG32Advance(scalarStatus[index].state,prime);
         }
-        __x16__PCG32SetSingleSeed(status+indexStatus,baseSeed[indexStatus]);
+        const __m512i seed0=_mm512_set_epi64(seedCopy[ 7],seedCopy[ 6],seedCopy[ 5],seedCopy[ 4],seedCopy[ 3],seedCopy[ 2],seedCopy[ 1],seedCopy[ 0]);
+        const __m512i seed1=_mm512_set_epi64(seedCopy[15],seedCopy[14],seedCopy[13],seedCopy[12],seedCopy[11],seedCopy[10],seedCopy[ 9],seedCopy[ 8]);
+        const __m512i add=_mm512_set_epi64(PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT,PCG32INCREMENT);
+        status[indexStatus].state0=_mm512_add_epi64(seed0,add);
+        status[indexStatus].state1=_mm512_add_epi64(seed1,add);
+        __x16__UnsignedArray random;
+        __x16__PCG32(status,random);
     }
 }
 
@@ -1833,7 +1874,7 @@ PCG32_HOST_DEVICE inline PCG32PRNG::PCG32PRNG(long long unsigned int seed){
 }
 
 PCG32_HOST_DEVICE inline void PCG32PRNG::SetSeed(long long unsigned int seed){
-    PCG32SetSeed(&status,seed);
+    PCG32SetSingleSeed(&status,seed);
 }
 
 PCG32_HOST_DEVICE inline unsigned PCG32PRNG::Rand(){
