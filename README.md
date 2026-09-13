@@ -150,136 +150,16 @@ PCG32SetSingleSeed(&state, PCG32TimeNanoeconds());
 ```
 
 **Multi-threaded Seed Initialization Example:**
-```cpp
-#include "PCG32.h"
-#include <omp.h>
 
-#define THREAD_NUMBER 32
-
-// or use malloc or std::vector if THREAD_NUMBER is not a compile-time constant
-long long unsigned int seeds[THREAD_NUMBER]; 
-PCG32Struct status[THREAD_NUMBER];
-long long unsigned int time = PCG32TimeNanoeconds();
-
-// Generate distinct seeds for each thread
-for (unsigned threadIndex = 0; threadIndex < THREAD_NUMBER; threadIndex++) {
-    seeds[threadIndex] = time + threadIndex * 0x123456789ABCDEFLLU + 1123;
-}
-
-// Initialize all generators with one call
-PCG32SetMultipleSeeds(status, seeds, THREAD_NUMBER);
-
-#pragma omp parallel num_threads(THREAD_NUMBER)
-{
-    int tid = omp_get_thread_num();
-    // Each thread uses its own generator
-    double u = PCG32UniformReal(&status[tid], 0.0, 1.0);
-    // ... generate more numbers ...
-}
-```
+See [CubeProjection.c](https://github.com/PandoraEartha/HighPerformanceRandomEngine/blob/main/CubeProjection.c)
 
 **AVX512 Multi-threaded Seed Initialization Example:**
 
-```c
-#include "PCG32.h"
-#include <omp.h>
-
-#define THREAD_NUMBER 32
-
-// or use malloc or std::vector if THREAD_NUMBER is not a compile-time constant
-__x16__SeedArray AVX512Seeds[THREAD_NUMBER];
-__x16__PCG32Struct AVX512Status[THREAD_NUMBER];
-long long unsigned int time = PCG32TimeNanoeconds();
-
-// Generate distinct seeds for each thread
-for (unsigned threadIndex = 0; threadIndex < THREAD_NUMBER; threadIndex++) {
-   for (unsigned index = 0; index < 16; index++) {
-       AVX512Seeds[threadIndex][index] = time + threadIndex * 0x123456789ABCDEFLLU + index;
-   }
-}
-
-// Initialize all generators for scalar and AVX512 usage
-__x16__PCG32SetMultipleSeeds(AVX512Status, AVX512Seeds, THREAD_NUMBER);
-
-#pragma omp parallel num_threads(THREAD_NUMBER)
-{
-   int tid = omp_get_thread_num();
-   
-   // AVX512 generator for this thread (generates 16 values at once)
-   __x16__DoubleArray avxUniforms;
-   __x16__PCG32UniformReal(&AVX512Status[tid], avxUniforms);
-   // Process 16 random values...
-}
-```
+See [CubeProjection.c](https://github.com/PandoraEartha/HighPerformanceRandomEngine/blob/main/CubeProjection.c)
 
 **CUDA Seed Initialization Example:**
-```cpp
-#include "PCG32.h"
 
-// CUDA kernel - each thread processes its own generator
-__global__ void kernel(PCG32Struct* deviceStatus, unsigned* results, int N) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= N) return;
-    
-    // Each thread copies its status from device memory to local stack
-    // (register/local memory is much faster than global memory)
-    PCG32Struct localStatus = deviceStatus[idx];
-    
-    // Generate random numbers using local state
-    for (int i = 0; i < 10; i++) {
-        unsigned random = PCG32(&localStatus);
-        results[idx * 10 + i] = random;
-    }
-    
-    // Write back updated state if needed for subsequent kernel launches
-    deviceStatus[idx] = localStatus;
-}
-
-int main() {
-    const int N = 1024 * 1024;  // 1 million threads
-    const int BLOCK_SIZE = 256;
-    const int GRID_SIZE = (N + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    
-    // Host-side arrays
-    long long unsigned int* seeds = (long long unsigned int*)malloc(N * sizeof(long long unsigned int));
-    PCG32Struct* hostStatus = (PCG32Struct*)malloc(N * sizeof(PCG32Struct));
-    unsigned* hostResults = (unsigned*)malloc(N * 10 * sizeof(unsigned));
-    
-    // Device-side arrays
-    PCG32Struct* deviceStatus;
-    unsigned* deviceResults;
-    cudaMalloc(&deviceStatus, N * sizeof(PCG32Struct));
-    cudaMalloc(&deviceResults, N * 10 * sizeof(unsigned));
-    
-    // Generate seeds on host
-    long long unsigned int time = PCG32TimeNanoeconds();
-    for (int i = 0; i < N; i++) {
-        seeds[i] = time + i * 0x123456789ABCDEFLLU + 1123;
-    }
-    
-    // Initialize all generators on host using PCG32SetMultipleSeeds
-    PCG32SetMultipleSeeds(hostStatus, seeds, N);
-    
-    // Copy initialized generators to device
-    cudaMemcpy(deviceStatus, hostStatus, N * sizeof(PCG32Struct), cudaMemcpyHostToDevice);
-    
-    // Launch kernel with proper grid configuration
-    kernel<<<GRID_SIZE, BLOCK_SIZE>>>(deviceStatus, deviceResults, N);
-    cudaDeviceSynchronize();
-    
-    // Copy results back
-    cudaMemcpy(hostResults, deviceResults, N * 10 * sizeof(unsigned), cudaMemcpyDeviceToHost);
-    
-    // Clean up
-    free(seeds);
-    free(hostStatus);
-    free(hostResults);
-    cudaFree(deviceStatus);
-    cudaFree(deviceResults);
-    
-    return 0;
-}
-```
+See [iKun.cu](https://github.com/PandoraEartha/HighPerformanceRandomEngine/blob/main/iKun.cu)
 
 ---
 
